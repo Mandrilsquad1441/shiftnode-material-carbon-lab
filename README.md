@@ -6,6 +6,8 @@ Live site: https://shiftnode-material-carbon-lab-770.netlify.app
 
 GitHub repository: https://github.com/Mandrilsquad1441/shiftnode-material-carbon-lab
 
+Deployment: Netlify CI is connected to the GitHub `main` branch.
+
 ## Run Locally
 
 ```bash
