@@ -20,16 +20,11 @@ import {
   Trash2,
 } from 'lucide-react'
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
   Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
-  XAxis,
-  YAxis,
 } from 'recharts'
 import './App.css'
 import {
@@ -114,9 +109,10 @@ function App() {
   )
 
   const comparisonData = [
-    { name: 'Baseline', carbon: result.baselineCarbon / 1000 },
-    { name: 'Proposed', carbon: result.alternativeCarbon / 1000 },
+    { name: 'Baseline', carbon: result.baselineCarbon },
+    { name: 'Proposed', carbon: result.alternativeCarbon },
   ]
+  const maxComparisonCarbon = Math.max(...comparisonData.map((item) => item.carbon), 1)
 
   const filteredMaterials = materials.filter((material) => {
     const matchesCategory = categoryFilter === 'All' || material.category === categoryFilter
@@ -391,15 +387,23 @@ function App() {
 
         <Panel className="chart-panel">
           <SectionTitle icon={<BarChart3 size={18} />} label="Carbon Compare" />
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={comparisonData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} />
-              <YAxis tickLine={false} axisLine={false} />
-              <Tooltip formatter={(value) => [Number(value ?? 0).toFixed(1), 'tCO2e']} />
-              <Bar dataKey="carbon" fill="#1f7a5c" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="compare-bars">
+            {comparisonData.map((item) => (
+              <div className="compare-row" key={item.name}>
+                <div>
+                  <span>{item.name}</span>
+                  <strong>{formatCarbon(item.carbon)}</strong>
+                </div>
+                <i>
+                  <b style={{ width: `${Math.max(8, (item.carbon / maxComparisonCarbon) * 100)}%` }} />
+                </i>
+              </div>
+            ))}
+            <div className="compare-delta">
+              <Leaf size={16} />
+              <span>{formatCarbon(result.carbonSavings)} avoided before operational energy.</span>
+            </div>
+          </div>
         </Panel>
 
         <Panel className="settings-panel">
