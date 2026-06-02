@@ -2,6 +2,10 @@
 
 A Netlify-ready CO2 savings tool for comparing construction material portfolios by embodied carbon, cost, technical fit, and procurement confidence.
 
+Live site: https://shiftnode-material-carbon-lab-770.netlify.app
+
+GitHub repository: https://github.com/Mandrilsquad1441/shiftnode-material-carbon-lab
+
 ## Run Locally
 
 ```bash
@@ -20,5 +24,5 @@ npm run build
 Use the deployed URL with `?embed=1` to hide the portfolio chrome:
 
 ```html
-<iframe src="https://your-netlify-site.netlify.app/?embed=1" title="ShiftNode Material Carbon Lab"></iframe>
+<iframe src="https://shiftnode-material-carbon-lab-770.netlify.app/?embed=1" title="ShiftNode Material Carbon Lab"></iframe>
 ```

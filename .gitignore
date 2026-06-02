@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 local-*-qa.png
+live-*-qa.png
 
 # Editor directories and files
 .vscode/*
@@ -23,3 +24,6 @@ local-*-qa.png
 *.njsproj
 *.sln
 *.sw?
+
+# Local Netlify folder
+.netlify
