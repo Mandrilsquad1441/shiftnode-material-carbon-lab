@@ -720,13 +720,12 @@ button:hover {
 }
 
 .cert-card small {
-  bottom: 10px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 850;
+  grid-column: 1 / -1;
   letter-spacing: 0.04em;
-  position: absolute;
-  right: 10px;
+  justify-self: end;
   text-transform: uppercase;
 }
 
