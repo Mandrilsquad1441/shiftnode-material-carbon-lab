@@ -967,10 +967,6 @@ function App() {
               </a>
             ))}
           </div>
-          <div className="embed-snippet">
-            <strong>Embed</strong>
-            <code>{`<iframe src="${window.location.origin}${window.location.pathname}?embed=1" title="ShiftNode Material Carbon Lab"></iframe>`}</code>
-          </div>
         </Panel>
       </section>
     </main>
