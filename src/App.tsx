@@ -87,7 +87,8 @@ function App() {
   const [lines, setLines] = useState<ScopeLine[]>(() => buildDefaultScope(defaultProfile))
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('All')
   const [query, setQuery] = useState('')
-  const [briefState, setBriefState] = useState('Ready')
+  const [briefState, setBriefState] = useState('Copy brief')
+  const [scopeNeedsRefresh, setScopeNeedsRefresh] = useState(false)
 
   const result = useMemo(() => calculatePortfolio(lines, settings), [lines, settings])
   const decisionBrief = useMemo(
@@ -124,6 +125,13 @@ function App() {
     .filter((item) => item.carbonSavings > 0)
     .sort((a, b) => b.carbonSavings - a.carbonSavings)
     .slice(0, 5)
+  const leadRecommendation = topRecommendations[0]
+  const costSignal =
+    result.costSavings >= 0
+      ? `${formatCurrency(result.costSavings)} saved`
+      : `${formatCurrency(Math.abs(result.costSavings))} premium`
+  const confidenceSignal =
+    result.confidenceScore >= 78 ? 'High confidence' : result.confidenceScore >= 62 ? 'Decision-ready' : 'Needs EPD review'
 
   const profileCompleteness =
     62 +
@@ -133,6 +141,7 @@ function App() {
   function updateProfile<K extends keyof ProjectProfile>(key: K, value: ProjectProfile[K]) {
     const nextProfile = { ...profile, [key]: value }
     setProfile(nextProfile)
+    if (key !== 'name') setScopeNeedsRefresh(true)
 
     if (key === 'region') {
       setSettings((current) => ({
@@ -144,6 +153,7 @@ function App() {
 
   function regenerateScope() {
     setLines(buildDefaultScope(profile))
+    setScopeNeedsRefresh(false)
   }
 
   function updateLine(lineId: string, patch: Partial<ScopeLine>) {
@@ -203,7 +213,7 @@ function App() {
   async function copyBrief() {
     await navigator.clipboard.writeText(decisionBrief)
     setBriefState('Copied')
-    window.setTimeout(() => setBriefState('Ready'), 1800)
+    window.setTimeout(() => setBriefState('Copy brief'), 1800)
   }
 
   function downloadCsv() {
@@ -255,6 +265,12 @@ function App() {
           <div>
             <p className="eyebrow">ShiftNode Digital</p>
             <h1>Material Carbon Lab</h1>
+            <p className="topbar-copy">Design-grade embodied carbon decisions, priced and ready for procurement.</p>
+            <div className="signal-pills" aria-label="Portfolio summary">
+              <span>{materials.length} materials</span>
+              <span>{categoryOrder.length} categories</span>
+              <span>{result.lines.length} active packages</span>
+            </div>
           </div>
           <div className="topbar-actions">
             <button className="icon-button" type="button" onClick={copyBrief} title="Copy decision brief">
@@ -271,18 +287,27 @@ function App() {
 
       <section className="summary-grid">
         <Panel className="project-panel">
-          <SectionTitle icon={<Calculator size={18} />} label="Project" />
+          <div className="panel-header">
+            <SectionTitle icon={<Calculator size={18} />} label="Project" />
+            <span className={scopeNeedsRefresh ? 'status-chip stale' : 'status-chip'}>
+              {scopeNeedsRefresh ? 'Refresh needed' : 'Scenario synced'}
+            </span>
+          </div>
           <div className="project-fields">
-            <label>
+            <label htmlFor="project-name">
               Name
               <input
+                id="project-name"
+                aria-label="Project name"
                 value={profile.name}
                 onChange={(event) => updateProfile('name', event.target.value)}
               />
             </label>
-            <label>
+            <label htmlFor="project-type">
               Type
               <select
+                id="project-type"
+                aria-label="Project type"
                 value={profile.projectType}
                 onChange={(event) =>
                   updateProfile('projectType', event.target.value as ProjectProfile['projectType'])
@@ -293,27 +318,33 @@ function App() {
                 ))}
               </select>
             </label>
-            <label>
+            <label htmlFor="project-area">
               Area m2
               <input
+                id="project-area"
+                aria-label="Project area in square meters"
                 type="number"
                 min="1"
                 value={profile.areaM2}
                 onChange={(event) => updateProfile('areaM2', Number(event.target.value))}
               />
             </label>
-            <label>
+            <label htmlFor="project-levels">
               Levels
               <input
+                id="project-levels"
+                aria-label="Project levels"
                 type="number"
                 min="1"
                 value={profile.levels}
                 onChange={(event) => updateProfile('levels', Number(event.target.value))}
               />
             </label>
-            <label>
+            <label htmlFor="project-structure">
               Structure
               <select
+                id="project-structure"
+                aria-label="Structural system"
                 value={profile.structure}
                 onChange={(event) =>
                   updateProfile('structure', event.target.value as ProjectProfile['structure'])
@@ -324,9 +355,11 @@ function App() {
                 ))}
               </select>
             </label>
-            <label>
+            <label htmlFor="project-region">
               Region
               <select
+                id="project-region"
+                aria-label="Project region"
                 value={profile.region}
                 onChange={(event) => updateProfile('region', event.target.value as ProjectProfile['region'])}
               >
@@ -335,9 +368,11 @@ function App() {
                 ))}
               </select>
             </label>
-            <label>
+            <label htmlFor="project-climate">
               Climate
               <select
+                id="project-climate"
+                aria-label="Climate zone"
                 value={profile.climate}
                 onChange={(event) =>
                   updateProfile('climate', event.target.value as ProjectProfile['climate'])
@@ -348,9 +383,11 @@ function App() {
                 ))}
               </select>
             </label>
-            <label>
+            <label htmlFor="project-stage">
               Stage
               <select
+                id="project-stage"
+                aria-label="Project stage"
                 value={profile.stage}
                 onChange={(event) => updateProfile('stage', event.target.value as ProjectProfile['stage'])}
               >
@@ -362,7 +399,7 @@ function App() {
           </div>
           <button className="full-button" type="button" onClick={regenerateScope}>
             <RefreshCw size={16} />
-            Rebuild quantities
+            {scopeNeedsRefresh ? 'Refresh quantities' : 'Rebuild quantities'}
           </button>
         </Panel>
 
@@ -403,6 +440,20 @@ function App() {
               <Leaf size={16} />
               <span>{formatCarbon(result.carbonSavings)} avoided before operational energy.</span>
             </div>
+            <div className="decision-pulse">
+              <div>
+                <span>Priority</span>
+                <strong>{leadRecommendation?.line.workPackage ?? 'No positive move yet'}</strong>
+              </div>
+              <div>
+                <span>Cost signal</span>
+                <strong>{costSignal}</strong>
+              </div>
+              <div>
+                <span>Reliability</span>
+                <strong>{confidenceSignal}</strong>
+              </div>
+            </div>
           </div>
         </Panel>
 
@@ -411,6 +462,7 @@ function App() {
           <label>
             Delivery km
             <input
+              aria-label="Delivery distance kilometers"
               type="number"
               min="0"
               value={settings.transportDistanceKm}
@@ -422,6 +474,7 @@ function App() {
           <label>
             Carbon price $/t
             <input
+              aria-label="Carbon price dollars per tonne"
               type="number"
               min="0"
               value={settings.carbonPriceUsdPerTonne}
@@ -433,6 +486,7 @@ function App() {
           <label>
             Cost factor
             <input
+              aria-label="Regional cost factor"
               type="number"
               step="0.01"
               min="0.1"
@@ -445,6 +499,7 @@ function App() {
           <label>
             Contingency %
             <input
+              aria-label="Cost contingency percent"
               type="number"
               min="0"
               value={settings.contingencyPercent}
@@ -455,6 +510,7 @@ function App() {
           </label>
           <label className="switch-row">
             <input
+              aria-label="Include biogenic storage credit"
               type="checkbox"
               checked={settings.includeBiogenicStorage}
               onChange={(event) =>
@@ -515,11 +571,13 @@ function App() {
                 <div className="scope-row" key={item.line.id}>
                   <div className="package-cell">
                     <input
+                      aria-label={`Work package name for ${item.line.workPackage}`}
                       title={item.line.workPackage}
                       value={item.line.workPackage}
                       onChange={(event) => updateLine(item.line.id, { workPackage: event.target.value })}
                     />
                     <select
+                      aria-label={`Material category for ${item.line.workPackage}`}
                       value={item.line.category}
                       onChange={(event) =>
                         updateLine(item.line.id, { category: event.target.value as MaterialCategory })
@@ -532,6 +590,7 @@ function App() {
                   </div>
                   <label className="quantity-cell">
                     <input
+                      aria-label={`Quantity for ${item.line.workPackage}`}
                       title={item.line.quantityBasis}
                       type="number"
                       min="0"
@@ -542,6 +601,7 @@ function App() {
                     <span>{baseline.unit}</span>
                   </label>
                   <select
+                    aria-label={`Baseline material for ${item.line.workPackage}`}
                     title={`${item.baseline.brand} - ${item.baseline.product}`}
                     value={item.line.baselineId}
                     onChange={(event) => updateLine(item.line.id, { baselineId: event.target.value })}
@@ -553,6 +613,7 @@ function App() {
                     ))}
                   </select>
                   <select
+                    aria-label={`Alternative material for ${item.line.workPackage}`}
                     title={`${item.alternative.brand} - ${item.alternative.product}`}
                     value={item.line.alternativeId}
                     onChange={(event) => updateLine(item.line.id, { alternativeId: event.target.value })}
@@ -567,7 +628,13 @@ function App() {
                     <strong>{formatCarbon(item.carbonSavings)}</strong>
                     <span>{formatCurrency(item.costSavings)}</span>
                   </div>
-                  <button className="icon-only danger" type="button" onClick={() => removeLine(item.line.id)} title="Remove package">
+                  <button
+                    aria-label={`Remove ${item.line.workPackage}`}
+                    className="icon-only danger"
+                    type="button"
+                    onClick={() => removeLine(item.line.id)}
+                    title="Remove package"
+                  >
                     <Trash2 size={16} />
                   </button>
                 </div>
@@ -627,6 +694,7 @@ function App() {
               <label className="searchbox">
                 <Search size={16} />
                 <input
+                  aria-label="Search material portfolio"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search products, specs, tags"
@@ -635,6 +703,7 @@ function App() {
               <label className="filterbox">
                 <Filter size={16} />
                 <select
+                  aria-label="Filter material portfolio by category"
                   value={categoryFilter}
                   onChange={(event) => setCategoryFilter(event.target.value as CategoryFilter)}
                 >

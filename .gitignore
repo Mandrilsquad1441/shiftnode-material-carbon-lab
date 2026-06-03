@@ -13,6 +13,7 @@ dist-ssr
 *.local
 local-*-qa.png
 live-*-qa.png
+ux-*-qa.png
 
 # Editor directories and files
 .vscode/*

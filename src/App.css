@@ -1,15 +1,23 @@
 .app-shell {
   min-height: 100svh;
   background:
+    linear-gradient(135deg, rgba(31, 122, 92, 0.08), transparent 34%),
+    linear-gradient(225deg, rgba(53, 109, 182, 0.07), transparent 38%),
     linear-gradient(180deg, rgba(244, 247, 243, 0.92), rgba(250, 250, 247, 0.98)),
     url('./assets/hero.png');
   background-position:
     center,
+    center,
+    center,
     right 24px top 18px;
   background-repeat:
+    no-repeat,
+    no-repeat,
     repeat,
     no-repeat;
   background-size:
+    auto,
+    auto,
     auto,
     360px auto;
   color: var(--ink);
@@ -22,7 +30,7 @@
 }
 
 .topbar {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   gap: 24px;
   justify-content: space-between;
@@ -41,9 +49,47 @@
 
 .topbar h1 {
   color: var(--ink-strong);
-  font-size: 34px;
+  font-size: 40px;
   line-height: 1;
   margin: 0;
+}
+
+.topbar-copy {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+  margin: 10px 0 0;
+  max-width: 640px;
+}
+
+.signal-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.signal-pills span,
+.status-chip {
+  background: rgba(255, 255, 252, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 8px 10px;
+}
+
+.status-chip {
+  background: #eaf6ef;
+  white-space: nowrap;
+}
+
+.status-chip.stale {
+  background: #fff2d4;
+  color: #8b650d;
 }
 
 .topbar-actions,
@@ -90,6 +136,10 @@
   padding: 16px;
 }
 
+.panel:hover {
+  border-color: rgba(31, 122, 92, 0.28);
+}
+
 .panel-header,
 .section-title {
   align-items: center;
@@ -101,6 +151,10 @@
 .section-title {
   justify-content: flex-start;
   margin-bottom: 14px;
+}
+
+.panel-header .section-title {
+  margin-bottom: 0;
 }
 
 .section-title svg {
@@ -183,7 +237,7 @@ button:hover {
 
 .icon-button.primary,
 .full-button {
-  background: var(--green);
+  background: linear-gradient(135deg, #1f7a5c, #2d9470);
   border-color: var(--green);
   color: #fff;
 }
@@ -228,15 +282,15 @@ button:hover {
 }
 
 .metric.green {
-  background: #1f7a5c;
+  background: linear-gradient(135deg, #1f7a5c, #258963);
 }
 
 .metric.gold {
-  background: #b98514;
+  background: linear-gradient(135deg, #b98514, #d59c1f);
 }
 
 .metric.blue {
-  background: #356db6;
+  background: linear-gradient(135deg, #356db6, #4b7dca);
 }
 
 .mini-grid {
@@ -314,6 +368,35 @@ button:hover {
   gap: 8px;
   line-height: 1.3;
   padding: 12px;
+}
+
+.decision-pulse {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+}
+
+.decision-pulse div {
+  background: #fbfcf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.decision-pulse span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.decision-pulse strong {
+  color: var(--ink-strong);
+  font-size: 13px;
+  line-height: 1.25;
 }
 
 .settings-panel {
@@ -720,6 +803,15 @@ button:hover {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .topbar h1 {
+    font-size: 34px;
+    line-height: 1.05;
+  }
+
+  .topbar-copy {
+    font-size: 14px;
   }
 
   .project-fields,
