@@ -1,4 +1,13 @@
 import { materials, materialsByCategory, type Material, type MaterialCategory } from '../data/materials'
+import {
+  compareRegionFit,
+  getMaterialDossier,
+  getRegionalAvailability,
+  getRegionalPrice,
+  getRegionFitScore,
+  regionProfiles,
+  type Region,
+} from '../data/materialIntelligence'
 
 export interface ProjectProfile {
   name: string
@@ -6,7 +15,7 @@ export interface ProjectProfile {
   areaM2: number
   levels: number
   structure: 'Concrete' | 'Steel' | 'Hybrid timber' | 'Light wood'
-  region: 'North America' | 'Europe' | 'Gulf / MENA' | 'Latin America'
+  region: Region
   climate: 'Cold' | 'Temperate' | 'Hot-humid' | 'Hot-dry'
   stage: 'Concept' | 'Schematic' | 'Design development' | 'Procurement'
 }
@@ -45,6 +54,10 @@ export interface LineResult {
   baselineStorageCredit: number
   alternativeStorageCredit: number
   confidenceScore: number
+  baselineRegionStatus: string
+  alternativeRegionStatus: string
+  regionalRiskNote: string
+  alternativePriceSignal: string
 }
 
 export interface PortfolioResult {
@@ -88,15 +101,8 @@ const confidenceWeight: Record<Material['confidence'], number> = {
   Estimate: 48,
 }
 
-const regionCost: Record<ProjectProfile['region'], number> = {
-  'North America': 1,
-  Europe: 1.08,
-  'Gulf / MENA': 1.18,
-  'Latin America': 0.86,
-}
-
 export function multiplierForRegion(region: ProjectProfile['region']) {
-  return regionCost[region]
+  return regionProfiles[region].costMultiplier
 }
 
 export function getMaterial(id: string) {
@@ -127,6 +133,46 @@ function makeLine(
   }
 }
 
+function isWeakAvailability(status: string) {
+  return status === 'Limited' || status === 'Imported / verify' || status === 'Not typical'
+}
+
+function chooseRegionalAlternative(
+  category: MaterialCategory,
+  baselineId: string,
+  preferredId: string,
+  region: Region,
+) {
+  const baseline = getMaterial(baselineId)
+  const preferred = getMaterial(preferredId)
+  const preferredStatus = getRegionalAvailability(preferred, region).status
+
+  if (!isWeakAvailability(preferredStatus)) return preferredId
+
+  const candidates = materialsByCategory[category].filter((material) => {
+    const status = getRegionalAvailability(material, region).status
+    return material.id !== baselineId && material.unit === baseline.unit && status !== 'Not typical'
+  })
+
+  return (
+    candidates
+      .sort((a, b) => {
+        const aCarbonMove = baseline.gwpPerUnit - a.gwpPerUnit
+        const bCarbonMove = baseline.gwpPerUnit - b.gwpPerUnit
+        const fitDelta = compareRegionFit(a, b, region)
+        if (Math.abs(fitDelta) > 18) return fitDelta
+        return bCarbonMove - aCarbonMove
+      })[0]?.id ?? preferredId
+  )
+}
+
+function adaptScopeToRegion(lines: ScopeLine[], region: Region) {
+  return lines.map((line) => ({
+    ...line,
+    alternativeId: chooseRegionalAlternative(line.category, line.baselineId, line.alternativeId, region),
+  }))
+}
+
 export function buildDefaultScope(profile: ProjectProfile): ScopeLine[] {
   const area = Math.max(profile.areaM2, 1)
   const roofArea = area / Math.max(profile.levels, 1)
@@ -135,23 +181,23 @@ export function buildDefaultScope(profile: ProjectProfile): ScopeLine[] {
   const flooringFactor = profile.projectType === 'Civil / landscape' ? 0 : 0.92
 
   if (profile.projectType === 'Interior fit-out') {
-    return [
+    return adaptScopeToRegion([
       makeLine('fitout-gypsum', 'Gypsum', 'Partitions and ceilings', area * 2.85, 'gypsum-standard-5-8', 'usg-ecosmart-typex', 'Area x partition intensity'),
       makeLine('fitout-floor', 'Flooring', 'Finish flooring', area * 0.92, 'flooring-lvt', 'flooring-interface-cquest', 'Net usable floor area'),
       makeLine('fitout-ceiling', 'Ceilings', 'Acoustic ceiling system', area * 0.82, 'ceiling-acoustic-mineral-fiber', 'ceiling-felt-baffles', 'Ceiling coverage'),
       makeLine('fitout-paint', 'Coatings', 'Painted surfaces', area * 2.2, 'paint-standard-low-voc', 'paint-mineral-silicate', 'Wall area two-coat basis'),
       makeLine('fitout-insulation', 'Insulation', 'Acoustic/thermal cavity insulation', area * 0.35, 'insulation-fiberglass-batt', 'insulation-cellulose-densepack', 'Selective insulated partition area'),
       makeLine('fitout-mep', 'MEP', 'Plumbing pipe allowance', area * 0.08, 'mep-copper-pipe', 'mep-pex-pipe', 'MEP kg allowance from area'),
-    ]
+    ], profile.region)
   }
 
   if (profile.projectType === 'Civil / landscape') {
-    return [
+    return adaptScopeToRegion([
       makeLine('civil-asphalt', 'Civil', 'Parking and drive paving', area * 0.16, 'civil-asphalt-hma', 'civil-warm-mix-rap', '160 kg asphalt per m2 of hardscape'),
       makeLine('civil-base', 'Civil', 'Aggregate base', area * 0.22, 'civil-aggregate-crushed', 'civil-recycled-aggregate', '220 kg aggregate per m2 of hardscape'),
       makeLine('civil-concrete', 'Concrete', 'Site concrete and curbs', area * 0.035, 'concrete-ready-mix-4000', 'concrete-low-cement-scm', 'Curbs, pads, walls allowance'),
       makeLine('civil-rebar', 'Steel', 'Reinforcement allowance', area * 1.2, 'steel-rebar-conventional', 'steel-rebar-eaf-epd', 'Rebar kg allowance'),
-    ]
+    ], profile.region)
   }
 
   const structuralLines =
@@ -179,7 +225,7 @@ export function buildDefaultScope(profile: ProjectProfile): ScopeLine[] {
               makeLine('structure-steel-misc', 'Steel', 'Miscellaneous steel', area * 8, 'steel-wide-flange-conventional', 'nucor-econiq-structural', '8 kg/m2 miscellaneous allowance'),
             ]
 
-  return [
+  return adaptScopeToRegion([
     ...structuralLines,
     makeLine('envelope-insulation', 'Insulation', 'Continuous insulation', area * envelopeFactor, 'insulation-xps-standard', 'rockwool-comfortboard-80', 'Envelope area R-10 equivalent'),
     makeLine('envelope-facade', 'Facade', 'Opaque facade cladding', area * 0.36, 'facade-aluminum-composite', 'facade-fiber-cement', 'Facade area allowance'),
@@ -188,10 +234,15 @@ export function buildDefaultScope(profile: ProjectProfile): ScopeLine[] {
     makeLine('interior-gypsum', 'Gypsum', 'Interior gypsum board', area * interiorWallFactor, 'gypsum-standard-5-8', 'usg-ecosmart-typex', 'Area x interior wall intensity'),
     makeLine('interior-flooring', 'Flooring', 'Floor finish', area * flooringFactor, 'flooring-lvt', 'flooring-marmoleum', 'Usable floor finish allowance'),
     makeLine('interior-paint', 'Coatings', 'Painted surfaces', area * 1.65, 'paint-standard-low-voc', 'paint-mineral-silicate', 'Wall/ceiling coating proxy'),
-  ]
+  ], profile.region)
 }
 
-function lineMaterialResult(material: Material, quantity: number, settings: ModelSettings) {
+function lineMaterialResult(
+  material: Material,
+  quantity: number,
+  settings: ModelSettings,
+  region: Region,
+) {
   const grossQuantity = quantity * (1 + material.wasteRate)
   const productCarbon = grossQuantity * material.gwpPerUnit
   const transportCarbon =
@@ -205,22 +256,26 @@ function lineMaterialResult(material: Material, quantity: number, settings: Mode
       ? grossQuantity * material.biogenicStoragePerUnit
       : 0
   const carbon = Math.max(productCarbon + transportCarbon - storageCredit, -productCarbon)
-  const cost =
-    grossQuantity *
-    material.priceUsd *
-    settings.regionCostMultiplier *
-    (1 + settings.contingencyPercent / 100)
+  const cost = grossQuantity * getRegionalPrice(material, region, settings.regionCostMultiplier) * (1 + settings.contingencyPercent / 100)
 
   return { carbon, cost, transportCarbon, storageCredit }
 }
 
-export function calculateLine(line: ScopeLine, settings: ModelSettings): LineResult {
+export function calculateLine(
+  line: ScopeLine,
+  settings: ModelSettings,
+  profile: ProjectProfile,
+): LineResult {
   const baseline = getMaterial(line.baselineId)
   const alternative = getMaterial(line.alternativeId)
-  const baselineResult = lineMaterialResult(baseline, line.quantity, settings)
-  const alternativeResult = lineMaterialResult(alternative, line.quantity, settings)
-  const confidenceScore =
-    (confidenceWeight[baseline.confidence] + confidenceWeight[alternative.confidence]) / 2
+  const baselineResult = lineMaterialResult(baseline, line.quantity, settings, profile.region)
+  const alternativeResult = lineMaterialResult(alternative, line.quantity, settings, profile.region)
+  const dataConfidence = (confidenceWeight[baseline.confidence] + confidenceWeight[alternative.confidence]) / 2
+  const regionConfidence = (getRegionFitScore(baseline, profile.region) + getRegionFitScore(alternative, profile.region)) / 2
+  const baselineAvailability = getRegionalAvailability(baseline, profile.region)
+  const alternativeAvailability = getRegionalAvailability(alternative, profile.region)
+  const confidenceScore = dataConfidence * 0.72 + regionConfidence * 0.28
+  const alternativeDossier = getMaterialDossier(alternative)
 
   return {
     line,
@@ -237,11 +292,19 @@ export function calculateLine(line: ScopeLine, settings: ModelSettings): LineRes
     baselineStorageCredit: baselineResult.storageCredit,
     alternativeStorageCredit: alternativeResult.storageCredit,
     confidenceScore,
+    baselineRegionStatus: baselineAvailability.status,
+    alternativeRegionStatus: alternativeAvailability.status,
+    regionalRiskNote: alternativeAvailability.notes,
+    alternativePriceSignal: alternativeDossier.priceSignal.seriesId,
   }
 }
 
-export function calculatePortfolio(lines: ScopeLine[], settings: ModelSettings): PortfolioResult {
-  const results = lines.map((line) => calculateLine(line, settings))
+export function calculatePortfolio(
+  lines: ScopeLine[],
+  settings: ModelSettings,
+  profile: ProjectProfile,
+): PortfolioResult {
+  const results = lines.map((line) => calculateLine(line, settings, profile))
   const baselineCarbon = results.reduce((sum, result) => sum + result.baselineCarbon, 0)
   const alternativeCarbon = results.reduce((sum, result) => sum + result.alternativeCarbon, 0)
   const baselineCost = results.reduce((sum, result) => sum + result.baselineCost, 0)
@@ -268,9 +331,26 @@ export function calculatePortfolio(lines: ScopeLine[], settings: ModelSettings):
   }
 }
 
-export function findLowestCarbonAlternative(category: MaterialCategory, currentId: string) {
-  const options = materialsByCategory[category].filter((material) => material.id !== currentId)
-  return options.sort((a, b) => a.gwpPerUnit - b.gwpPerUnit)[0]
+export function findLowestCarbonAlternative(
+  category: MaterialCategory,
+  currentId: string,
+  region?: Region,
+) {
+  const current = getMaterial(currentId)
+  const options = materialsByCategory[category].filter(
+    (material) => material.id !== currentId && material.unit === current.unit,
+  )
+  const regionFiltered = region
+    ? options.filter((material) => getRegionalAvailability(material, region).status !== 'Not typical')
+    : options
+  const pool = regionFiltered.length > 0 ? regionFiltered : options
+  return pool.sort((a, b) => {
+    if (region) {
+      const fitDelta = compareRegionFit(a, b, region)
+      if (Math.abs(fitDelta) > 24) return fitDelta
+    }
+    return a.gwpPerUnit - b.gwpPerUnit
+  })[0]
 }
 
 export function createDecisionBrief(
@@ -289,6 +369,7 @@ export function createDecisionBrief(
 
   return `Project: ${profile.name}
 Type: ${profile.projectType}, ${profile.areaM2.toLocaleString()} m2, ${profile.levels} level(s), ${profile.structure}
+Region: ${profile.region}
 Model: ${profile.stage}; ${settings.transportDistanceKm} km assumed delivery; biogenic storage ${
     settings.includeBiogenicStorage ? 'included' : 'excluded'
   }.
@@ -310,7 +391,8 @@ ${topLines}
 Procurement notes:
 - Require current product-specific EPDs before award.
 - Ask suppliers for max GWP per unit, not only recycled-content claims.
-- Keep prices editable by bid package; public prices are directional.
+- Prices are index-adjusted benchmarks, not live supplier quotes; keep every price editable by bid package.
+- Verify regional availability before specifying named products, especially imported or limited items.
 - Re-run the model when structural grid, facade ratio, or finish quantities change.`
 }
 

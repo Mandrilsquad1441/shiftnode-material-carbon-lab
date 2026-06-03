@@ -83,6 +83,12 @@ const sourceUrls = {
     'https://www.homedepot.com/b/Building-Materials-Concrete-Cement-Masonry-Rebar-Accessories-Rebar/4-rebar/Steel/20-ft/N-5yc1vZ1z18g8sZ1z0v4peZ1z111zeZ1z204i8',
   millSupplyEcoSmart:
     'https://www.millsupplyco.com/products/usg-4x8x5-8-ecosmart-firecode-drywall-m41459',
+  fredPpi: 'https://fred.stlouisfed.org/data/PCU327320327320',
+  usgbcEpd: 'https://www.usgbc.org/node/2755924',
+  usgbcLeedV5: 'https://www.usgbc.org/leed/v5',
+  breeamMat01: 'https://kb.breeam.com/wp-content/plugins/breeamkb-pdf/pdf/?c=2807',
+  wellV2: 'https://standard.wellcertified.com/v2/',
+  ilfiZeroCarbon: 'https://living-future.org/zero-carbon/basics/',
 }
 
 const benchmark = sourceUrls.clf
@@ -1478,5 +1484,23 @@ export const sourceNotes = [
     detail:
       'Used as directional material-price anchors. The app intentionally keeps all prices editable because construction pricing changes by region, volume, specification, and trade package.',
     url: sourceUrls.homeDepotRebar,
+  },
+  {
+    label: 'Official price indexes',
+    detail:
+      'Netlify functions check BLS/FRED producer price indexes for concrete, cement, steel, lumber, gypsum, and plastic construction products. These are index signals, not supplier quotes.',
+    url: sourceUrls.fredPpi,
+  },
+  {
+    label: 'Certification logic',
+    detail:
+      'LEED, BREEAM, WELL, and ILFI guidance is used to map EPDs, low-emitting products, material-health review, and embodied-carbon reduction evidence.',
+    url: sourceUrls.usgbcLeedV5,
+  },
+  {
+    label: 'Material disclosure pathways',
+    detail:
+      'USGBC EPD guidance, BREEAM Mat 01, WELL v2, and ILFI Zero Carbon are used as screening prompts; formal credit claims require assessor review.',
+    url: sourceUrls.usgbcEpd,
   },
 ]

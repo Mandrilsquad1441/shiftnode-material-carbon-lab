@@ -102,6 +102,7 @@
 }
 
 .summary-grid,
+.intelligence-grid,
 .workbench-grid,
 .portfolio-section,
 .brief-grid {
@@ -125,6 +126,12 @@
   display: grid;
   gap: 14px;
   grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+}
+
+.intelligence-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(280px, 0.86fr) minmax(280px, 0.86fr) minmax(360px, 1.28fr);
 }
 
 .panel {
@@ -491,6 +498,14 @@ button:hover {
   font-size: 13px;
 }
 
+.saving small {
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+  text-transform: uppercase;
+}
+
 .saving.positive {
   background: #eaf6ef;
   color: var(--green-dark);
@@ -534,6 +549,185 @@ button:hover {
 .muted {
   color: var(--muted);
   font-size: 12px;
+}
+
+.recommendation small {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  margin-top: 3px;
+}
+
+.region-score {
+  align-items: center;
+  background: #edf5ee;
+  border: 1px solid rgba(31, 122, 92, 0.18);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.region-score strong {
+  color: var(--green-dark);
+  font-size: 34px;
+  line-height: 1;
+}
+
+.region-score span,
+.price-engine span,
+.price-engine small,
+.fine-print {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.intelligence-list {
+  display: grid;
+  gap: 8px;
+}
+
+.intelligence-list span,
+.market-warning,
+.cert-evidence span {
+  align-items: flex-start;
+  background: #fbfcf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  line-height: 1.35;
+  padding: 10px;
+}
+
+.market-warning {
+  background: #fff7df;
+  color: #77520b;
+  margin-top: 10px;
+}
+
+.price-engine {
+  background: #fbfcf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+  padding: 12px;
+}
+
+.price-engine strong {
+  color: var(--ink-strong);
+  font-size: 21px;
+}
+
+.price-series-list {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.price-series-list a {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 10px;
+  text-decoration: none;
+}
+
+.price-series-list span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.price-series-list strong {
+  color: var(--green-dark);
+  font-size: 12px;
+}
+
+.fine-print {
+  margin: 10px 0 0;
+}
+
+.certification-stack,
+.cert-evidence {
+  display: grid;
+  gap: 8px;
+}
+
+.certification-stack {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cert-evidence {
+  margin-top: 10px;
+}
+
+.cert-card {
+  background: #fbfcf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 92px;
+  padding: 10px;
+  position: relative;
+}
+
+.cert-card.strong {
+  border-color: rgba(31, 122, 92, 0.3);
+}
+
+.cert-card.promising {
+  border-color: rgba(213, 156, 31, 0.34);
+}
+
+.cert-card strong,
+.dossier-main h3 {
+  color: var(--ink-strong);
+}
+
+.cert-card strong,
+.cert-card span {
+  display: block;
+}
+
+.cert-card span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+  margin-top: 4px;
+}
+
+.cert-card b {
+  color: var(--green-dark);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.cert-card small {
+  bottom: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  position: absolute;
+  right: 10px;
+  text-transform: uppercase;
 }
 
 .recommendation b {
@@ -594,6 +788,137 @@ button:hover {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.dossier {
+  background: linear-gradient(135deg, #f7fbf7, #fbfcf8);
+  border: 1px solid rgba(31, 122, 92, 0.2);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.dossier-main {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.dossier-main h3 {
+  font-size: 21px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.dossier-main p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 6px 0 0;
+}
+
+.dossier-score {
+  background: #eaf6ef;
+  border: 1px solid rgba(31, 122, 92, 0.18);
+  border-radius: 8px;
+  color: var(--green-dark);
+  min-width: 112px;
+  padding: 10px;
+  text-align: right;
+}
+
+.dossier-score strong {
+  display: block;
+  font-size: 25px;
+  line-height: 1;
+}
+
+.dossier-score span {
+  display: block;
+  font-size: 11px;
+  font-weight: 850;
+  margin-top: 4px;
+}
+
+.dossier-metrics,
+.dossier-columns {
+  display: grid;
+  gap: 10px;
+}
+
+.dossier-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dossier-metrics span {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  min-height: 62px;
+  padding: 9px;
+}
+
+.dossier-metrics b {
+  color: var(--ink-strong);
+  display: block;
+  font-size: 17px;
+  line-height: 1.05;
+  margin-bottom: 5px;
+}
+
+.dossier-columns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dossier-columns div {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px;
+}
+
+.dossier-columns strong {
+  color: var(--ink-strong);
+  font-size: 12px;
+}
+
+.dossier-columns ul {
+  color: var(--ink);
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+  line-height: 1.35;
+  margin: 8px 0 0;
+  padding-left: 16px;
+}
+
+.dossier-footer {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.dossier-footer span,
+.dossier-footer a {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+  line-height: 1.3;
+  min-height: 38px;
+  padding: 0 10px;
+  text-decoration: none;
+}
+
 .material-card {
   background: #fbfcf8;
   border: 1px solid var(--line);
@@ -602,6 +927,11 @@ button:hover {
   gap: 10px;
   min-height: 268px;
   padding: 13px;
+}
+
+.material-card.selected {
+  border-color: rgba(31, 122, 92, 0.5);
+  box-shadow: 0 0 0 3px rgba(31, 122, 92, 0.1);
 }
 
 .material-top,
@@ -686,6 +1016,22 @@ button:hover {
   padding-left: 16px;
 }
 
+.card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.card-chips span {
+  background: #eef4f7;
+  border-radius: 999px;
+  color: #356174;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 5px 7px;
+}
+
 .material-footer {
   border-top: 1px solid var(--line);
   margin-top: auto;
@@ -699,12 +1045,20 @@ button:hover {
 }
 
 .material-footer a,
+.material-footer button,
 .material-footer span {
   align-items: center;
   display: inline-flex;
   font-size: 12px;
   font-weight: 800;
   gap: 4px;
+}
+
+.material-footer button {
+  background: #edf5ee;
+  color: var(--green-dark);
+  min-height: 28px;
+  padding: 0 9px;
 }
 
 .material-footer span {
@@ -782,6 +1136,7 @@ button:hover {
   }
 
   .workbench-grid,
+  .intelligence-grid,
   .brief-grid {
     grid-template-columns: 1fr;
   }
@@ -792,6 +1147,15 @@ button:hover {
 
   .material-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dossier-metrics,
+  .dossier-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dossier-footer {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -817,8 +1181,21 @@ button:hover {
   .project-fields,
   .summary-grid,
   .side-stack,
+  .certification-stack,
+  .price-series-list,
+  .dossier-metrics,
+  .dossier-columns,
   .material-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dossier-main {
+    flex-direction: column;
+  }
+
+  .dossier-score {
+    text-align: left;
+    width: 100%;
   }
 
   .scope-head {
@@ -838,9 +1215,21 @@ button:hover {
     width: 100%;
   }
 
+  .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .portfolio-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .searchbox,
   .filterbox,
   .icon-button {
     flex: 1;
+    min-width: 0;
+    width: 100%;
   }
 }

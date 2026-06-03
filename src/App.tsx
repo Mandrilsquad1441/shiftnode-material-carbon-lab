@@ -1,21 +1,28 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  AlertTriangle,
   ArrowDownToLine,
   BadgeCheck,
   BarChart3,
   Calculator,
+  CheckCircle2,
+  Clock3,
   Clipboard,
   Database,
   ExternalLink,
+  FileCheck2,
   FileText,
   Filter,
   Gauge,
   Leaf,
   LineChart,
+  MapPin,
+  PackageCheck,
   Plus,
   RefreshCw,
   Search,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Trash2,
 } from 'lucide-react'
@@ -36,6 +43,16 @@ import {
   type MaterialCategory,
 } from './data/materials'
 import {
+  compareRegionFit,
+  getMaterialDossier,
+  getRegionalAvailability,
+  getRegionalPrice,
+  getRegionFitScore,
+  materialSearchText,
+  regionPortfolioStats,
+  regionProfiles,
+} from './data/materialIntelligence'
+import {
   buildDefaultScope,
   calculatePortfolio,
   createDecisionBrief,
@@ -51,8 +68,28 @@ import {
   type ProjectProfile,
   type ScopeLine,
 } from './model/calculator'
+import { buildCertificationSummary, type CertificationOpportunity } from './model/certifications'
 
 type CategoryFilter = MaterialCategory | 'All'
+type PriceHealth = 'loading' | 'live' | 'fallback' | 'error'
+
+interface PriceSeriesResult {
+  seriesId: string
+  label: string
+  latestDate: string
+  latestValue: number
+  previousValue: number | null
+  monthlyChangePercent: number | null
+  sourceUrl: string
+}
+
+interface PriceIntelligence {
+  status: PriceHealth
+  lastCheckedAt: string
+  cadence: string
+  limitation: string
+  series: PriceSeriesResult[]
+}
 
 const projectTypes: ProjectProfile['projectType'][] = [
   'Commercial core/shell',
@@ -70,12 +107,26 @@ const colors = ['#1f7a5c', '#e4a72c', '#356db6', '#b34d4d', '#6f5fb8', '#2f8d9b'
 
 const isEmbedMode = new URLSearchParams(window.location.search).get('embed') === '1'
 
-function compatibleAlternative(category: MaterialCategory, baselineId: string) {
+const fallbackPriceIntelligence: PriceIntelligence = {
+  status: 'fallback',
+  lastCheckedAt: 'Static build benchmark',
+  cadence: 'Netlify production checks official PPI feeds nightly',
+  limitation: 'Local preview uses static material estimates; production fetches official PPI index movement.',
+  series: [],
+}
+
+function compatibleAlternative(category: MaterialCategory, baselineId: string, region: ProjectProfile['region']) {
   const baseline = getMaterial(baselineId)
   const candidates = materialsByCategory[category].filter(
     (material) => material.id !== baselineId && material.unit === baseline.unit,
   )
-  return candidates.sort((a, b) => a.gwpPerUnit - b.gwpPerUnit)[0] ?? baseline
+  return candidates
+    .filter((material) => getRegionalAvailability(material, region).status !== 'Not typical')
+    .sort((a, b) => {
+      const fitDelta = compareRegionFit(a, b, region)
+      if (Math.abs(fitDelta) > 24) return fitDelta
+      return a.gwpPerUnit - b.gwpPerUnit
+    })[0] ?? baseline
 }
 
 function App() {
@@ -89,11 +140,21 @@ function App() {
   const [query, setQuery] = useState('')
   const [briefState, setBriefState] = useState('Copy brief')
   const [scopeNeedsRefresh, setScopeNeedsRefresh] = useState(false)
+  const [selectedMaterialId, setSelectedMaterialId] = useState('amrize-ecotect')
+  const [priceIntelligence, setPriceIntelligence] = useState<PriceIntelligence>({
+    ...fallbackPriceIntelligence,
+    status: 'loading',
+    limitation: 'Checking official price-index feeds.',
+  })
 
-  const result = useMemo(() => calculatePortfolio(lines, settings), [lines, settings])
+  const result = useMemo(() => calculatePortfolio(lines, settings, profile), [lines, settings, profile])
   const decisionBrief = useMemo(
     () => createDecisionBrief(profile, result, settings),
     [profile, result, settings],
+  )
+  const certificationSummary = useMemo(
+    () => buildCertificationSummary(profile, result),
+    [profile, result],
   )
 
   const hotspotData = useMemo(
@@ -115,11 +176,12 @@ function App() {
   ]
   const maxComparisonCarbon = Math.max(...comparisonData.map((item) => item.carbon), 1)
 
-  const filteredMaterials = materials.filter((material) => {
-    const matchesCategory = categoryFilter === 'All' || material.category === categoryFilter
-    const searchText = `${material.brand} ${material.product} ${material.family} ${material.tags.join(' ')}`.toLowerCase()
-    return matchesCategory && searchText.includes(query.toLowerCase())
-  })
+  const filteredMaterials = materials
+    .filter((material) => {
+      const matchesCategory = categoryFilter === 'All' || material.category === categoryFilter
+      return matchesCategory && materialSearchText(material).includes(query.toLowerCase())
+    })
+    .sort((a, b) => compareRegionFit(a, b, profile.region))
 
   const topRecommendations = [...result.lines]
     .filter((item) => item.carbonSavings > 0)
@@ -132,11 +194,38 @@ function App() {
       : `${formatCurrency(Math.abs(result.costSavings))} premium`
   const confidenceSignal =
     result.confidenceScore >= 78 ? 'High confidence' : result.confidenceScore >= 62 ? 'Decision-ready' : 'Needs EPD review'
+  const activeMaterials = result.lines.flatMap((line) => [line.baseline, line.alternative])
+  const regionalStats = regionPortfolioStats(activeMaterials, profile.region)
+  const selectedMaterial = getMaterial(selectedMaterialId)
+  const selectedDossier = getMaterialDossier(selectedMaterial)
+  const selectedAvailability = getRegionalAvailability(selectedMaterial, profile.region)
+  const selectedRegionalPrice = getRegionalPrice(selectedMaterial, profile.region, settings.regionCostMultiplier)
+  const priceSeriesById = new Map(priceIntelligence.series.map((series) => [series.seriesId, series]))
 
   const profileCompleteness =
     62 +
     (profile.stage === 'Procurement' ? 18 : profile.stage === 'Design development' ? 12 : 6) +
     Math.min(20, Math.round(lines.length * 1.7))
+
+  useEffect(() => {
+    let active = true
+
+    async function loadPriceIntelligence() {
+      try {
+        const response = await fetch('/api/price-intelligence')
+        if (!response.ok) throw new Error(`Price intelligence unavailable: ${response.status}`)
+        const data = (await response.json()) as PriceIntelligence
+        if (active) setPriceIntelligence({ ...data, status: 'live' })
+      } catch {
+        if (active) setPriceIntelligence(fallbackPriceIntelligence)
+      }
+    }
+
+    loadPriceIntelligence()
+    return () => {
+      active = false
+    }
+  }, [])
 
   function updateProfile<K extends keyof ProjectProfile>(key: K, value: ProjectProfile[K]) {
     const nextProfile = { ...profile, [key]: value }
@@ -163,7 +252,7 @@ function App() {
 
         if (patch.category && patch.category !== line.category) {
           const first = materialsByCategory[patch.category][0]
-          const alternative = compatibleAlternative(patch.category, first.id)
+          const alternative = compatibleAlternative(patch.category, first.id, profile.region)
           return {
             ...line,
             ...patch,
@@ -175,7 +264,7 @@ function App() {
 
         if (patch.baselineId) {
           const nextBaseline = getMaterial(patch.baselineId)
-          const alternative = compatibleAlternative(line.category, patch.baselineId)
+          const alternative = compatibleAlternative(line.category, patch.baselineId, profile.region)
           return {
             ...line,
             ...patch,
@@ -191,7 +280,7 @@ function App() {
 
   function addLine(category: MaterialCategory) {
     const baseline = materialsByCategory[category][0]
-    const alternative = compatibleAlternative(category, baseline.id)
+    const alternative = compatibleAlternative(category, baseline.id, profile.region)
     setLines((current) => [
       ...current,
       {
@@ -211,8 +300,34 @@ function App() {
   }
 
   async function copyBrief() {
-    await navigator.clipboard.writeText(decisionBrief)
-    setBriefState('Copied')
+    let copied: boolean
+    try {
+      await navigator.clipboard.writeText(decisionBrief)
+      copied = true
+    } catch {
+      const fallback = document.createElement('textarea')
+      fallback.value = decisionBrief
+      fallback.setAttribute('readonly', 'true')
+      fallback.style.position = 'fixed'
+      fallback.style.left = '-9999px'
+      document.body.append(fallback)
+      fallback.select()
+      copied = document.execCommand('copy')
+      fallback.remove()
+    }
+
+    if (!copied) {
+      const brief = document.querySelector('.brief')
+      if (brief) {
+        const range = document.createRange()
+        range.selectNodeContents(brief)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+      }
+    }
+
+    setBriefState(copied ? 'Copied' : 'Selected brief')
     window.setTimeout(() => setBriefState('Copy brief'), 1800)
   }
 
@@ -270,6 +385,8 @@ function App() {
               <span>{materials.length} materials</span>
               <span>{categoryOrder.length} categories</span>
               <span>{result.lines.length} active packages</span>
+              <span>{regionalStats.score}% region fit</span>
+              <span>{priceIntelligence.status === 'live' ? 'PPI live' : 'Price fallback'}</span>
             </div>
           </div>
           <div className="topbar-actions">
@@ -526,6 +643,86 @@ function App() {
         </Panel>
       </section>
 
+      <section className="intelligence-grid">
+        <Panel className="market-panel">
+          <div className="panel-header">
+            <SectionTitle icon={<MapPin size={18} />} label="Regional Intelligence" />
+            <span className="status-chip">{profile.region}</span>
+          </div>
+          <div className="region-score">
+            <strong>{regionalStats.score}%</strong>
+            <span>
+              {regionalStats.preferredOrAvailable}/{regionalStats.total} selected products are preferred or available.
+            </span>
+          </div>
+          <div className="intelligence-list">
+            {regionProfiles[profile.region].marketNotes.map((note) => (
+              <span key={note}>{note}</span>
+            ))}
+          </div>
+          <div className="market-warning">
+            <AlertTriangle size={16} />
+            <span>{regionProfiles[profile.region].procurementReality}</span>
+          </div>
+        </Panel>
+
+        <Panel className="price-panel">
+          <div className="panel-header">
+            <SectionTitle icon={<Clock3 size={18} />} label="Price Intelligence" />
+            <span className={priceIntelligence.status === 'live' ? 'status-chip' : 'status-chip stale'}>
+              {priceIntelligence.status === 'live' ? 'Official feed' : 'Static fallback'}
+            </span>
+          </div>
+          <div className="price-engine">
+            <strong>{priceIntelligence.series.length || 6} tracked indexes</strong>
+            <span>{priceIntelligence.cadence}</span>
+            <small>Last check: {priceIntelligence.lastCheckedAt}</small>
+          </div>
+          <div className="price-series-list">
+            {priceIntelligence.series.slice(0, 4).map((series) => (
+              <a href={series.sourceUrl} target="_blank" rel="noreferrer" key={series.seriesId}>
+                <span>{series.seriesId}</span>
+                <strong>
+                  {series.monthlyChangePercent === null
+                    ? 'Index ready'
+                    : `${series.monthlyChangePercent >= 0 ? '+' : ''}${series.monthlyChangePercent.toFixed(1)}%`}
+                </strong>
+              </a>
+            ))}
+            {priceIntelligence.series.length === 0 && (
+              <span className="muted">{priceIntelligence.limitation}</span>
+            )}
+          </div>
+          <p className="fine-print">{priceIntelligence.limitation}</p>
+        </Panel>
+
+        <Panel className="certification-panel">
+          <div className="panel-header">
+            <SectionTitle icon={<ShieldCheck size={18} />} label="Certification Fit" />
+            <span className="status-chip">{certificationSummary.strongCount} strong</span>
+          </div>
+          <div className="certification-stack">
+            {certificationSummary.opportunities.slice(0, 6).map((opportunity) => (
+              <CertificationCard key={opportunity.system} opportunity={opportunity} />
+            ))}
+          </div>
+          <div className="cert-evidence">
+            <span>
+              <FileCheck2 size={14} />
+              {certificationSummary.epdReadyCount} EPD-ready products
+            </span>
+            <span>
+              <PackageCheck size={14} />
+              {certificationSummary.materialHealthWatchCount} health watch item(s)
+            </span>
+            <span>
+              <CheckCircle2 size={14} />
+              {certificationSummary.topEvidence[0]}
+            </span>
+          </div>
+        </Panel>
+      </section>
+
       <section className="workbench-grid">
         <Panel className="line-editor">
           <div className="panel-header">
@@ -608,7 +805,7 @@ function App() {
                   >
                     {materialsByCategory[item.line.category].map((material) => (
                       <option key={material.id} value={material.id}>
-                        {material.brand} - {material.product}
+                        {material.brand} - {material.product} ({getRegionalAvailability(material, profile.region).status})
                       </option>
                     ))}
                   </select>
@@ -620,13 +817,14 @@ function App() {
                   >
                     {alternatives.map((material) => (
                       <option key={material.id} value={material.id}>
-                        {material.brand} - {material.product}
+                        {material.brand} - {material.product} ({getRegionalAvailability(material, profile.region).status})
                       </option>
                     ))}
                   </select>
                   <div className={item.carbonSavings >= 0 ? 'saving positive' : 'saving negative'}>
                     <strong>{formatCarbon(item.carbonSavings)}</strong>
                     <span>{formatCurrency(item.costSavings)}</span>
+                    <small>{item.alternativeRegionStatus}</small>
                   </div>
                   <button
                     aria-label={`Remove ${item.line.workPackage}`}
@@ -654,6 +852,7 @@ function App() {
                     <span>
                       {item.alternative.brand} {item.alternative.product}
                     </span>
+                    <small>{item.alternativeRegionStatus} in {profile.region}</small>
                   </div>
                   <b>{formatCarbon(item.carbonSavings)}</b>
                 </div>
@@ -716,9 +915,24 @@ function App() {
             </div>
           </div>
 
+          <MaterialDossierPanel
+            material={selectedMaterial}
+            dossier={selectedDossier}
+            availability={selectedAvailability}
+            region={profile.region}
+            regionalPrice={selectedRegionalPrice}
+            priceSeries={priceSeriesById.get(selectedDossier.priceSignal.seriesId)}
+          />
+
           <div className="material-grid">
             {filteredMaterials.map((material) => (
-              <MaterialCard key={material.id} material={material} />
+              <MaterialCard
+                key={material.id}
+                material={material}
+                region={profile.region}
+                selected={material.id === selectedMaterialId}
+                onSelect={() => setSelectedMaterialId(material.id)}
+              />
             ))}
           </div>
         </Panel>
@@ -785,15 +999,124 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
   )
 }
 
-function MaterialCard({ material }: { material: Material }) {
-  const bestSwap = findLowestCarbonAlternative(material.category, material.id)
+function CertificationCard({ opportunity }: { opportunity: CertificationOpportunity }) {
   return (
-    <article className="material-card">
+    <article className={`cert-card ${opportunity.fit.toLowerCase()}`}>
+      <div>
+        <strong>{opportunity.system}</strong>
+        <span>{opportunity.pathway}</span>
+      </div>
+      <b>{opportunity.score}</b>
+      <small>{opportunity.fit}</small>
+    </article>
+  )
+}
+
+function MaterialDossierPanel({
+  material,
+  dossier,
+  availability,
+  region,
+  regionalPrice,
+  priceSeries,
+}: {
+  material: Material
+  dossier: ReturnType<typeof getMaterialDossier>
+  availability: ReturnType<typeof getRegionalAvailability>
+  region: ProjectProfile['region']
+  regionalPrice: number
+  priceSeries?: PriceSeriesResult
+}) {
+  return (
+    <article className="dossier">
+      <div className="dossier-main">
+        <div>
+          <span className="eyebrow">Technical dossier</span>
+          <h3>{material.product}</h3>
+          <p>{material.brand} - {material.category} - {dossier.evidenceLevel}</p>
+        </div>
+        <div className="dossier-score">
+          <strong>{getRegionFitScore(material, region)}%</strong>
+          <span>{availability.status}</span>
+        </div>
+      </div>
+      <div className="dossier-metrics">
+        <span>
+          <b>{material.gwpPerUnit}</b>
+          {material.gwpUnit}
+        </span>
+        <span>
+          <b>{formatCurrency(regionalPrice)}</b>
+          regional / {material.unit}
+        </span>
+        <span>
+          <b>{dossier.reductionRangePercent.map((value) => `${Math.round(value)}%`).join(' to ')}</b>
+          modeled reduction range
+        </span>
+        <span>
+          <b>{dossier.redListRisk}</b>
+          material-health risk
+        </span>
+      </div>
+      <div className="dossier-columns">
+        <DossierBlock title="Specs" items={dossier.technicalSpecs.slice(0, 6)} />
+        <DossierBlock title="Evidence" items={dossier.submittals.slice(0, 5)} />
+        <DossierBlock title="Questions" items={dossier.procurementQuestions.slice(0, 5)} />
+      </div>
+      <div className="dossier-footer">
+        <span>
+          <MapPin size={14} />
+          {availability.notes}
+        </span>
+        <span>
+          <Clock3 size={14} />
+          {availability.leadTimeWeeks[0]}-{availability.leadTimeWeeks[1]} week lead signal
+        </span>
+        <a href={dossier.priceSignal.sourceUrl} target="_blank" rel="noreferrer">
+          {priceSeries
+            ? `${priceSeries.seriesId}: ${priceSeries.latestDate}`
+            : dossier.priceSignal.label}
+          <ExternalLink size={13} />
+        </a>
+      </div>
+    </article>
+  )
+}
+
+function DossierBlock({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <strong>{title}</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function MaterialCard({
+  material,
+  region,
+  selected,
+  onSelect,
+}: {
+  material: Material
+  region: ProjectProfile['region']
+  selected: boolean
+  onSelect: () => void
+}) {
+  const bestSwap = findLowestCarbonAlternative(material.category, material.id, region)
+  const dossier = getMaterialDossier(material)
+  const availability = getRegionalAvailability(material, region)
+  return (
+    <article className={selected ? 'material-card selected' : 'material-card'}>
       <div className="material-top">
         <span className={`role ${material.climateRole.toLowerCase().replaceAll(' ', '-')}`}>
           {material.climateRole}
         </span>
-        <span>{material.confidence}</span>
+        <span>{availability.status}</span>
       </div>
       <h3>{material.product}</h3>
       <p>{material.brand}</p>
@@ -803,20 +1126,28 @@ function MaterialCard({ material }: { material: Material }) {
           {material.gwpUnit}
         </span>
         <span>
-          <b>{formatCurrency(material.priceUsd)}</b>
-          per {material.unit}
+          <b>{Math.round(getRegionFitScore(material, region))}%</b>
+          region fit
         </span>
       </div>
       <ul>
-        {material.specs.slice(0, 3).map((spec) => (
+        {dossier.technicalSpecs.slice(0, 3).map((spec) => (
           <li key={spec}>{spec}</li>
         ))}
       </ul>
+      <div className="card-chips">
+        {dossier.certificationSignals.slice(0, 3).map((signal) => (
+          <span key={signal}>{signal}</span>
+        ))}
+      </div>
       <div className="material-footer">
         <a href={material.sourceUrl} target="_blank" rel="noreferrer">
           Source
           <ExternalLink size={13} />
         </a>
+        <button type="button" onClick={onSelect} aria-label={`Review ${material.product}`}>
+          Review
+        </button>
         {bestSwap && bestSwap.id !== material.id && <span>Lowest: {bestSwap.product}</span>}
       </div>
     </article>

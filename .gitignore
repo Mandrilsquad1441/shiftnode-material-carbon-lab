@@ -14,6 +14,8 @@ dist-ssr
 local-*-qa.png
 live-*-qa.png
 ux-*-qa.png
+state-of-art-*-qa.png
+deno.lock
 
 # Editor directories and files
 .vscode/*
