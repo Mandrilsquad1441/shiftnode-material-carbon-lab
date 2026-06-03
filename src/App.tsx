@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
+  ArrowRight,
   ArrowDownToLine,
   BadgeCheck,
   BarChart3,
@@ -14,11 +15,14 @@ import {
   FileText,
   Filter,
   Gauge,
+  Layers3,
   Leaf,
+  Link2,
   LineChart,
   MapPin,
   PackageCheck,
   Plus,
+  Printer,
   RefreshCw,
   Search,
   Settings2,
@@ -65,13 +69,20 @@ import {
   getMaterial,
   multiplierForRegion,
   type ModelSettings,
+  type LineResult,
+  type PortfolioResult,
   type ProjectProfile,
   type ScopeLine,
 } from './model/calculator'
-import { buildCertificationSummary, type CertificationOpportunity } from './model/certifications'
+import {
+  buildCertificationSummary,
+  type CertificationOpportunity,
+  type CertificationSummary,
+} from './model/certifications'
 
 type CategoryFilter = MaterialCategory | 'All'
 type PriceHealth = 'loading' | 'live' | 'fallback' | 'error'
+type PresetId = 'commercial-core-shell' | 'interior-fitout' | 'residential-low-carbon' | 'civil-landscape'
 
 interface PriceSeriesResult {
   seriesId: string
@@ -91,6 +102,23 @@ interface PriceIntelligence {
   series: PriceSeriesResult[]
 }
 
+interface ScenarioState {
+  version: 1
+  profile: ProjectProfile
+  settings: ModelSettings
+  lines: ScopeLine[]
+  selectedMaterialId: string
+}
+
+interface ScenarioPreset {
+  id: PresetId
+  title: string
+  summary: string
+  profile: ProjectProfile
+  settings?: Partial<ModelSettings>
+  selectedMaterialId: string
+}
+
 const projectTypes: ProjectProfile['projectType'][] = [
   'Commercial core/shell',
   'Interior fit-out',
@@ -105,7 +133,10 @@ const stages: ProjectProfile['stage'][] = ['Concept', 'Schematic', 'Design devel
 
 const colors = ['#1f7a5c', '#e4a72c', '#356db6', '#b34d4d', '#6f5fb8', '#2f8d9b', '#8a6d3b']
 
-const isEmbedMode = new URLSearchParams(window.location.search).get('embed') === '1'
+const initialParams = new URLSearchParams(window.location.search)
+const isEmbedMode = initialParams.get('embed') === '1'
+const isCompactMode = isEmbedMode && initialParams.get('compact') === '1'
+const shouldOpenReport = initialParams.get('report') === '1'
 
 const fallbackPriceIntelligence: PriceIntelligence = {
   status: 'fallback',
@@ -113,6 +144,217 @@ const fallbackPriceIntelligence: PriceIntelligence = {
   cadence: 'Netlify production checks official PPI feeds nightly',
   limitation: 'Local preview uses static material estimates; production fetches official PPI index movement.',
   series: [],
+}
+
+const scenarioPresets: ScenarioPreset[] = [
+  {
+    id: 'commercial-core-shell',
+    title: 'Commercial Core/Shell',
+    summary: 'Hybrid structure, envelope, interiors, and bid-ready low-carbon alternates.',
+    profile: {
+      ...defaultProfile,
+      name: 'Commercial low-carbon core/shell',
+      projectType: 'Commercial core/shell',
+      areaM2: 5000,
+      levels: 6,
+      structure: 'Hybrid timber',
+      region: 'North America',
+      climate: 'Temperate',
+      stage: 'Schematic',
+    },
+    selectedMaterialId: 'amrize-ecotect',
+  },
+  {
+    id: 'interior-fitout',
+    title: 'Interior Fit-Out',
+    summary: 'Fast tenant-improvement scan for gypsum, flooring, ceilings, paint, and MEP.',
+    profile: {
+      ...defaultProfile,
+      name: 'Interior fit-out material strategy',
+      projectType: 'Interior fit-out',
+      areaM2: 2800,
+      levels: 1,
+      structure: 'Steel',
+      region: 'Europe',
+      climate: 'Temperate',
+      stage: 'Design development',
+    },
+    settings: {
+      contingencyPercent: 8,
+    },
+    selectedMaterialId: 'flooring-interface-cquest',
+  },
+  {
+    id: 'residential-low-carbon',
+    title: 'Residential Low-Carbon',
+    summary: 'Light wood, lower-impact envelope, durable finishes, and storage-credit option.',
+    profile: {
+      ...defaultProfile,
+      name: 'Residential low-carbon concept',
+      projectType: 'Residential',
+      areaM2: 850,
+      levels: 3,
+      structure: 'Light wood',
+      region: 'North America',
+      climate: 'Cold',
+      stage: 'Concept',
+    },
+    settings: {
+      includeBiogenicStorage: true,
+      carbonPriceUsdPerTonne: 60,
+    },
+    selectedMaterialId: 'wood-tji-framing-system',
+  },
+  {
+    id: 'civil-landscape',
+    title: 'Civil / Landscape',
+    summary: 'Hardscape, warm-mix asphalt, recycled aggregates, curbs, and rebar.',
+    profile: {
+      ...defaultProfile,
+      name: 'Civil landscape low-carbon package',
+      projectType: 'Civil / landscape',
+      areaM2: 12000,
+      levels: 1,
+      structure: 'Concrete',
+      region: 'Latin America',
+      climate: 'Hot-humid',
+      stage: 'Schematic',
+    },
+    settings: {
+      transportDistanceKm: 80,
+      contingencyPercent: 12,
+    },
+    selectedMaterialId: 'civil-warm-mix-rap',
+  },
+]
+
+function isProjectType(value: unknown): value is ProjectProfile['projectType'] {
+  return projectTypes.includes(value as ProjectProfile['projectType'])
+}
+
+function isStructure(value: unknown): value is ProjectProfile['structure'] {
+  return structures.includes(value as ProjectProfile['structure'])
+}
+
+function isRegion(value: unknown): value is ProjectProfile['region'] {
+  return regions.includes(value as ProjectProfile['region'])
+}
+
+function isClimate(value: unknown): value is ProjectProfile['climate'] {
+  return climates.includes(value as ProjectProfile['climate'])
+}
+
+function isStage(value: unknown): value is ProjectProfile['stage'] {
+  return stages.includes(value as ProjectProfile['stage'])
+}
+
+function isMaterialCategory(value: unknown): value is MaterialCategory {
+  return categoryOrder.includes(value as MaterialCategory)
+}
+
+function sanitizeProfile(value: Partial<ProjectProfile> | undefined): ProjectProfile {
+  return {
+    name: typeof value?.name === 'string' && value.name.trim() ? value.name.slice(0, 80) : defaultProfile.name,
+    projectType: isProjectType(value?.projectType) ? value.projectType : defaultProfile.projectType,
+    areaM2: Math.max(1, Math.min(500_000, Number(value?.areaM2) || defaultProfile.areaM2)),
+    levels: Math.max(1, Math.min(120, Math.round(Number(value?.levels) || defaultProfile.levels))),
+    structure: isStructure(value?.structure) ? value.structure : defaultProfile.structure,
+    region: isRegion(value?.region) ? value.region : defaultProfile.region,
+    climate: isClimate(value?.climate) ? value.climate : defaultProfile.climate,
+    stage: isStage(value?.stage) ? value.stage : defaultProfile.stage,
+  }
+}
+
+function boundedNumber(value: unknown, fallback: number, min: number, max: number) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback
+}
+
+function sanitizeSettings(value: Partial<ModelSettings> | undefined, profile: ProjectProfile): ModelSettings {
+  return {
+    transportDistanceKm: boundedNumber(value?.transportDistanceKm, defaultSettings.transportDistanceKm, 0, 5000),
+    freightKgCo2PerTonneKm: boundedNumber(value?.freightKgCo2PerTonneKm, defaultSettings.freightKgCo2PerTonneKm, 0, 1),
+    regionCostMultiplier:
+      value?.regionCostMultiplier === undefined
+        ? multiplierForRegion(profile.region)
+        : boundedNumber(value.regionCostMultiplier, multiplierForRegion(profile.region), 0.1, 5),
+    includeBiogenicStorage: Boolean(value?.includeBiogenicStorage),
+    carbonPriceUsdPerTonne: boundedNumber(value?.carbonPriceUsdPerTonne, defaultSettings.carbonPriceUsdPerTonne, 0, 2000),
+    contingencyPercent: boundedNumber(value?.contingencyPercent, defaultSettings.contingencyPercent, 0, 100),
+  }
+}
+
+function sanitizeLine(
+  value: Partial<ScopeLine> | undefined,
+  fallback: ScopeLine,
+  region: ProjectProfile['region'],
+): ScopeLine {
+  const category = isMaterialCategory(value?.category) ? value.category : fallback.category
+  const categoryMaterials = materialsByCategory[category]
+  const baseline = typeof value?.baselineId === 'string' ? getSafeMaterial(value.baselineId) : undefined
+  const baselineId = baseline && baseline.category === category ? baseline.id : categoryMaterials[0].id
+  const baselineMaterial = getMaterial(baselineId)
+  const alternative = typeof value?.alternativeId === 'string' ? getSafeMaterial(value.alternativeId) : undefined
+  const alternativeId =
+    alternative && alternative.category === category && alternative.unit === baselineMaterial.unit
+      ? alternative.id
+      : compatibleAlternative(category, baselineId, region).id
+
+  return {
+    id: typeof value?.id === 'string' && value.id.trim() ? value.id.slice(0, 80) : fallback.id,
+    category,
+    workPackage:
+      typeof value?.workPackage === 'string' && value.workPackage.trim()
+        ? value.workPackage.slice(0, 96)
+        : fallback.workPackage,
+    quantity: Math.max(0, Math.min(5_000_000, Number(value?.quantity) || fallback.quantity)),
+    baselineId,
+    alternativeId,
+    quantityBasis:
+      typeof value?.quantityBasis === 'string' && value.quantityBasis.trim()
+        ? value.quantityBasis.slice(0, 120)
+        : fallback.quantityBasis,
+  }
+}
+
+function getSafeMaterial(id: string) {
+  return materials.find((material) => material.id === id)
+}
+
+function encodeScenarioState(state: ScenarioState) {
+  const json = JSON.stringify(state)
+  return btoa(encodeURIComponent(json))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '')
+}
+
+function decodeScenarioState(value: string | null) {
+  if (!value) return null
+  try {
+    const padded = value.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(value.length / 4) * 4, '=')
+    const parsed = JSON.parse(decodeURIComponent(atob(padded))) as Partial<ScenarioState>
+    const profile = sanitizeProfile(parsed.profile)
+    const fallbackLines = buildDefaultScope(profile)
+    const lines =
+      Array.isArray(parsed.lines) && parsed.lines.length > 0
+        ? parsed.lines.slice(0, 40).map((line, index) => sanitizeLine(line, fallbackLines[index] ?? fallbackLines[0], profile.region))
+        : fallbackLines
+    const settings = sanitizeSettings(parsed.settings, profile)
+    const selectedMaterialId =
+      typeof parsed.selectedMaterialId === 'string' && getSafeMaterial(parsed.selectedMaterialId)
+        ? parsed.selectedMaterialId
+        : lines[0]?.alternativeId ?? 'amrize-ecotect'
+
+    return {
+      profile,
+      settings,
+      lines,
+      selectedMaterialId,
+    }
+  } catch {
+    return null
+  }
 }
 
 function compatibleAlternative(category: MaterialCategory, baselineId: string, region: ProjectProfile['region']) {
@@ -129,18 +371,25 @@ function compatibleAlternative(category: MaterialCategory, baselineId: string, r
     })[0] ?? baseline
 }
 
+const initialScenario = decodeScenarioState(initialParams.get('scenario'))
+
 function App() {
-  const [profile, setProfile] = useState<ProjectProfile>(defaultProfile)
-  const [settings, setSettings] = useState<ModelSettings>({
-    ...defaultSettings,
-    regionCostMultiplier: multiplierForRegion(defaultProfile.region),
-  })
-  const [lines, setLines] = useState<ScopeLine[]>(() => buildDefaultScope(defaultProfile))
+  const [profile, setProfile] = useState<ProjectProfile>(initialScenario?.profile ?? defaultProfile)
+  const [settings, setSettings] = useState<ModelSettings>(
+    initialScenario?.settings ?? {
+      ...defaultSettings,
+      regionCostMultiplier: multiplierForRegion(defaultProfile.region),
+    },
+  )
+  const [lines, setLines] = useState<ScopeLine[]>(() => initialScenario?.lines ?? buildDefaultScope(defaultProfile))
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('All')
   const [query, setQuery] = useState('')
   const [briefState, setBriefState] = useState('Copy brief')
+  const [shareState, setShareState] = useState('Share scenario')
   const [scopeNeedsRefresh, setScopeNeedsRefresh] = useState(false)
-  const [selectedMaterialId, setSelectedMaterialId] = useState('amrize-ecotect')
+  const [selectedMaterialId, setSelectedMaterialId] = useState(initialScenario?.selectedMaterialId ?? 'amrize-ecotect')
+  const [showMethodology, setShowMethodology] = useState(false)
+  const [showReport, setShowReport] = useState(shouldOpenReport)
   const [priceIntelligence, setPriceIntelligence] = useState<PriceIntelligence>({
     ...fallbackPriceIntelligence,
     status: 'loading',
@@ -187,6 +436,13 @@ function App() {
     .filter((item) => item.carbonSavings > 0)
     .sort((a, b) => b.carbonSavings - a.carbonSavings)
     .slice(0, 5)
+  const storyData = topRecommendations.slice(0, 6).map((item) => ({
+    id: item.line.id,
+    workPackage: item.line.workPackage,
+    product: `${item.alternative.brand} - ${item.alternative.product}`,
+    savings: item.carbonSavings,
+  }))
+  const maxStorySavings = Math.max(...storyData.map((item) => item.savings), 1)
   const leadRecommendation = topRecommendations[0]
   const costSignal =
     result.costSavings >= 0
@@ -201,6 +457,14 @@ function App() {
   const selectedAvailability = getRegionalAvailability(selectedMaterial, profile.region)
   const selectedRegionalPrice = getRegionalPrice(selectedMaterial, profile.region, settings.regionCostMultiplier)
   const priceSeriesById = new Map(priceIntelligence.series.map((series) => [series.seriesId, series]))
+  const strongestCertification = certificationSummary.opportunities[0]
+  const reportUrl = `${window.location.origin}${window.location.pathname}?report=1&scenario=${encodeScenarioState({
+    version: 1,
+    profile,
+    settings,
+    lines,
+    selectedMaterialId,
+  })}`
 
   const profileCompleteness =
     62 +
@@ -243,6 +507,22 @@ function App() {
   function regenerateScope() {
     setLines(buildDefaultScope(profile))
     setScopeNeedsRefresh(false)
+  }
+
+  function applyPreset(preset: ScenarioPreset) {
+    const nextProfile = preset.profile
+    const nextSettings = {
+      ...defaultSettings,
+      ...preset.settings,
+      regionCostMultiplier: multiplierForRegion(nextProfile.region),
+    }
+    setProfile(nextProfile)
+    setSettings(nextSettings)
+    setLines(buildDefaultScope(nextProfile))
+    setSelectedMaterialId(preset.selectedMaterialId)
+    setScopeNeedsRefresh(false)
+    setQuery('')
+    setCategoryFilter('All')
   }
 
   function updateLine(lineId: string, patch: Partial<ScopeLine>) {
@@ -373,8 +653,67 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  async function copyTextWithFallback(text: string, targetSelector?: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      const fallback = document.createElement('textarea')
+      fallback.value = text
+      fallback.setAttribute('readonly', 'true')
+      fallback.style.position = 'fixed'
+      fallback.style.left = '-9999px'
+      document.body.append(fallback)
+      fallback.select()
+      const copied = document.execCommand('copy')
+      fallback.remove()
+
+      if (!copied && targetSelector) {
+        const target = document.querySelector(targetSelector)
+        if (target) {
+          const range = document.createRange()
+          range.selectNodeContents(target)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+        }
+      }
+
+      return copied
+    }
+  }
+
+  async function shareScenario() {
+    const scenario = encodeScenarioState({
+      version: 1,
+      profile,
+      settings,
+      lines,
+      selectedMaterialId,
+    })
+    const url = new URL(window.location.href)
+    url.search = ''
+    url.searchParams.set('scenario', scenario)
+    const copied = await copyTextWithFallback(url.toString())
+    setShareState(copied ? 'Copied link' : 'Link ready')
+    window.history.replaceState(null, '', url)
+    window.setTimeout(() => setShareState('Share scenario'), 1800)
+  }
+
+  function openReport() {
+    setShowReport(true)
+    window.history.replaceState(null, '', reportUrl)
+  }
+
+  function closeReport() {
+    setShowReport(false)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('report')
+    window.history.replaceState(null, '', url)
+  }
+
   return (
-    <main className={isEmbedMode ? 'app-shell embed' : 'app-shell'}>
+    <main className={['app-shell', isEmbedMode ? 'embed' : '', isCompactMode ? 'compact' : ''].filter(Boolean).join(' ')}>
       {!isEmbedMode && (
         <header className="topbar">
           <div>
@@ -390,6 +729,23 @@ function App() {
             </div>
           </div>
           <div className="topbar-actions">
+            <button className="icon-button" type="button" onClick={shareScenario} title="Copy shareable scenario link">
+              <Link2 size={18} />
+              <span>{shareState}</span>
+            </button>
+            <button className="icon-button" type="button" onClick={openReport} title="Open report">
+              <Printer size={18} />
+              <span>Report</span>
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setShowMethodology((current) => !current)}
+              title="View methodology"
+            >
+              <FileCheck2 size={18} />
+              <span>Methodology</span>
+            </button>
             <button className="icon-button" type="button" onClick={copyBrief} title="Copy decision brief">
               <Clipboard size={18} />
               <span>{briefState}</span>
@@ -400,6 +756,23 @@ function App() {
             </button>
           </div>
         </header>
+      )}
+
+      {!isCompactMode && (
+        <section className="preset-strip" aria-label="Quick start scenarios">
+          <div>
+            <span className="eyebrow">Quick start</span>
+            <h2>Start with a real project pattern</h2>
+          </div>
+          <div className="preset-actions">
+            {scenarioPresets.map((preset) => (
+              <button type="button" key={preset.id} onClick={() => applyPreset(preset)}>
+                <strong>{preset.title}</strong>
+                <span>{preset.summary}</span>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       <section className="summary-grid">
@@ -642,6 +1015,75 @@ function App() {
           </div>
         </Panel>
       </section>
+
+      <section className="strategy-grid">
+        <Panel className="strategy-panel">
+          <div className="panel-header">
+            <SectionTitle icon={<Sparkles size={18} />} label="Executive Strategy" />
+            <span className="status-chip">{strongestCertification?.fit ?? 'Screening'} certification fit</span>
+          </div>
+          <div className="strategy-lead">
+            <strong>
+              Prioritize {leadRecommendation?.alternative.family.toLowerCase() ?? 'verified low-carbon material substitutions'} for a {formatCarbon(result.carbonSavings)} savings signal.
+            </strong>
+            <span>
+              The current scenario reduces embodied carbon by {formatPercent(result.savingsPercent)} with a {costSignal.toLowerCase()} and {regionalStats.weak} regional procurement watch item(s).
+            </span>
+          </div>
+          <div className="strategy-moves">
+            {topRecommendations.slice(0, 3).map((item, index) => (
+              <article key={item.line.id}>
+                <b>{index + 1}</b>
+                <div>
+                  <strong>{item.line.workPackage}</strong>
+                  <span>{item.alternative.brand} - {item.alternative.product}</span>
+                </div>
+                <em>{formatCarbon(item.carbonSavings)}</em>
+              </article>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel className="story-panel">
+          <SectionTitle icon={<Layers3 size={18} />} label="Carbon Savings Story" />
+          <div className="impact-chart" aria-label="Ranked embodied carbon savings by work package">
+            {storyData.map((item, index) => (
+              <article key={item.id}>
+                <b>{index + 1}</b>
+                <div>
+                  <strong>{item.workPackage}</strong>
+                  <span>{item.product}</span>
+                </div>
+                <i>
+                  <span style={{ width: `${Math.max(8, (item.savings / maxStorySavings) * 100)}%` }} />
+                </i>
+                <em>{formatCarbon(item.savings)}</em>
+              </article>
+            ))}
+          </div>
+        </Panel>
+      </section>
+
+      {showMethodology && !isCompactMode && (
+        <section className="methodology-drawer">
+          <Panel>
+            <div className="panel-header">
+              <SectionTitle icon={<FileCheck2 size={18} />} label="Methodology" />
+              <button type="button" className="icon-button" onClick={() => setShowMethodology(false)}>
+                Close
+              </button>
+            </div>
+            <div className="methodology-grid">
+              <span><b>Carbon model</b>A1-A3 material values plus transport and optional biogenic storage credit.</span>
+              <span><b>Price model</b>Editable benchmark costs adjusted by region and official PPI movement, not supplier quotes.</span>
+              <span><b>Regional fit</b>Availability, lead-time risk, and product substitution reality by macro-region.</span>
+              <span><b>Certification</b>Screening only; formal LEED, BREEAM, WELL, ILFI, or DGNB claims require assessor review.</span>
+              <span><b>Confidence</b>EPD-led products score higher than manufacturer claims, benchmarks, or concept estimates.</span>
+              <span><b>Last price check</b>{priceIntelligence.lastCheckedAt}</span>
+            </div>
+          </Panel>
+        </section>
+      )}
 
       <section className="intelligence-grid">
         <Panel className="market-panel">
@@ -938,6 +1380,20 @@ function App() {
         </Panel>
       </section>
 
+      {!isEmbedMode && (
+        <section className="cta-band">
+          <div>
+            <span className="eyebrow">ShiftNode Digital</span>
+            <strong>Want this material strategy adapted to a real project?</strong>
+            <p>Use this scenario as a starting point, then bring ShiftNode into the design conversation for a project-specific low-carbon roadmap.</p>
+          </div>
+          <a href="mailto:hello@shiftnode.digital?subject=Material%20Carbon%20Lab%20Project%20Strategy">
+            Start a project conversation
+            <ArrowRight size={16} />
+          </a>
+        </section>
+      )}
+
       <section className="brief-grid">
         <Panel>
           <SectionTitle icon={<FileText size={18} />} label="Decision Brief" />
@@ -969,6 +1425,18 @@ function App() {
           </div>
         </Panel>
       </section>
+
+      {showReport && (
+        <ReportOverlay
+          profile={profile}
+          result={result}
+          topRecommendations={topRecommendations}
+          certificationSummary={certificationSummary}
+          regionalStats={regionalStats}
+          priceIntelligence={priceIntelligence}
+          onClose={closeReport}
+        />
+      )}
     </main>
   )
 }
@@ -991,6 +1459,106 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
     <div className={`metric ${accent}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  )
+}
+
+function ReportOverlay({
+  profile,
+  result,
+  topRecommendations,
+  certificationSummary,
+  regionalStats,
+  priceIntelligence,
+  onClose,
+}: {
+  profile: ProjectProfile
+  result: PortfolioResult
+  topRecommendations: LineResult[]
+  certificationSummary: CertificationSummary
+  regionalStats: ReturnType<typeof regionPortfolioStats>
+  priceIntelligence: PriceIntelligence
+  onClose: () => void
+}) {
+  return (
+    <div className="report-overlay" role="dialog" aria-modal="true" aria-label="Low carbon material strategy report">
+      <article className="report-sheet">
+        <header className="report-header">
+          <div>
+            <span className="eyebrow">ShiftNode Digital</span>
+            <h2>Low Carbon Material Strategy</h2>
+            <p>{profile.name}</p>
+          </div>
+          <div className="report-actions">
+            <button type="button" className="icon-button" onClick={() => window.print()}>
+              <Printer size={17} />
+              Print / PDF
+            </button>
+            <button type="button" className="icon-button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </header>
+
+        <section className="report-metrics">
+          <span><b>{formatCarbon(result.carbonSavings)}</b>Embodied carbon avoided</span>
+          <span><b>{formatPercent(result.savingsPercent)}</b>Reduction signal</span>
+          <span><b>{formatCurrency(result.netValue)}</b>Net value signal</span>
+          <span><b>{regionalStats.score}%</b>Regional fit</span>
+        </section>
+
+        <section className="report-section">
+          <h3>Project Snapshot</h3>
+          <p>
+            {profile.projectType}, {profile.areaM2.toLocaleString()} m2, {profile.levels} level(s), {profile.structure}, {profile.region}, {profile.stage}.
+          </p>
+        </section>
+
+        <section className="report-section">
+          <h3>Recommended Material Moves</h3>
+          <div className="report-table">
+            {topRecommendations.slice(0, 6).map((item) => (
+              <div key={item.line.id}>
+                <strong>{item.line.workPackage}</strong>
+                <span>{item.baseline.product}</span>
+                <span>{item.alternative.product}</span>
+                <b>{formatCarbon(item.carbonSavings)}</b>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="report-section">
+          <h3>Certification Opportunities</h3>
+          <div className="report-certs">
+            {certificationSummary.opportunities.slice(0, 5).map((opportunity) => (
+              <span key={opportunity.system}>
+                <b>{opportunity.system}</b>
+                {opportunity.fit} - {opportunity.score}/100
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <section className="report-section">
+          <h3>Evidence Checklist</h3>
+          <ul>
+            {certificationSummary.topEvidence.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+            <li>Supplier quotes tied to exact product, region, quantity, and bid package.</li>
+            <li>Product-specific EPDs and source URLs for high-carbon substitutions.</li>
+            <li>Assessor review before formal LEED, BREEAM, WELL, ILFI, or DGNB claims.</li>
+          </ul>
+        </section>
+
+        <section className="report-section report-assumptions">
+          <h3>Assumptions</h3>
+          <p>
+            Pricing uses editable concept benchmarks and official PPI index signals. Last price check: {priceIntelligence.lastCheckedAt}. This report is a screening artifact and should be validated with supplier quotes, project-specific quantities, and assessor review.
+          </p>
+        </section>
+      </article>
     </div>
   )
 }
