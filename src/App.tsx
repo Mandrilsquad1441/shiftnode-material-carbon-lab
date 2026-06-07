@@ -83,6 +83,8 @@ import {
 type CategoryFilter = MaterialCategory | 'All'
 type PriceHealth = 'loading' | 'live' | 'fallback' | 'error'
 type PresetId = 'commercial-core-shell' | 'interior-fitout' | 'residential-low-carbon' | 'civil-landscape'
+type ExperienceMode = 'guided' | 'expert'
+type EvidenceTab = 'checklist' | 'dossier' | 'certifications' | 'pricing' | 'sources'
 
 interface PriceSeriesResult {
   seriesId: string
@@ -108,6 +110,7 @@ interface ScenarioState {
   settings: ModelSettings
   lines: ScopeLine[]
   selectedMaterialId: string
+  mode?: ExperienceMode
 }
 
 interface ScenarioPreset {
@@ -137,6 +140,7 @@ const initialParams = new URLSearchParams(window.location.search)
 const isEmbedMode = initialParams.get('embed') === '1'
 const isCompactMode = isEmbedMode && initialParams.get('compact') === '1'
 const shouldOpenReport = initialParams.get('report') === '1'
+const shouldShowCompactPresets = isCompactMode && initialParams.get('presets') === '1'
 
 const fallbackPriceIntelligence: PriceIntelligence = {
   status: 'fallback',
@@ -252,6 +256,10 @@ function isMaterialCategory(value: unknown): value is MaterialCategory {
   return categoryOrder.includes(value as MaterialCategory)
 }
 
+function isExperienceMode(value: unknown): value is ExperienceMode {
+  return value === 'guided' || value === 'expert'
+}
+
 function sanitizeProfile(value: Partial<ProjectProfile> | undefined): ProjectProfile {
   return {
     name: typeof value?.name === 'string' && value.name.trim() ? value.name.slice(0, 80) : defaultProfile.name,
@@ -345,16 +353,36 @@ function decodeScenarioState(value: string | null) {
       typeof parsed.selectedMaterialId === 'string' && getSafeMaterial(parsed.selectedMaterialId)
         ? parsed.selectedMaterialId
         : lines[0]?.alternativeId ?? 'amrize-ecotect'
+    const mode = isExperienceMode(parsed.mode) ? parsed.mode : undefined
 
     return {
       profile,
       settings,
       lines,
       selectedMaterialId,
+      mode,
     }
   } catch {
     return null
   }
+}
+
+function confidenceLabel(item: LineResult) {
+  if (item.confidenceScore >= 82) return 'High confidence'
+  if (item.confidenceScore >= 64) return 'Medium confidence'
+  return 'Quote required'
+}
+
+function priceBasisLabel(item: LineResult, priceStatus: PriceHealth) {
+  if (item.alternativePriceSignal === 'BENCHMARK') return 'Supplier quote required'
+  return priceStatus === 'live' ? 'Live index adjusted' : 'Benchmark estimate'
+}
+
+function regionWarningLabel(status: string) {
+  if (status === 'Preferred') return 'Preferred'
+  if (status === 'Available') return 'Available'
+  if (status === 'Imported / verify') return 'Imported/substitute likely'
+  return status
 }
 
 function compatibleAlternative(category: MaterialCategory, baselineId: string, region: ProjectProfile['region']) {
@@ -372,6 +400,9 @@ function compatibleAlternative(category: MaterialCategory, baselineId: string, r
 }
 
 const initialScenario = decodeScenarioState(initialParams.get('scenario'))
+const initialModeParam = initialParams.get('mode')
+const initialMode: ExperienceMode =
+  (isExperienceMode(initialModeParam) ? initialModeParam : initialScenario?.mode) ?? 'guided'
 
 function App() {
   const [profile, setProfile] = useState<ProjectProfile>(initialScenario?.profile ?? defaultProfile)
@@ -388,7 +419,12 @@ function App() {
   const [shareState, setShareState] = useState('Share scenario')
   const [scopeNeedsRefresh, setScopeNeedsRefresh] = useState(false)
   const [selectedMaterialId, setSelectedMaterialId] = useState(initialScenario?.selectedMaterialId ?? 'amrize-ecotect')
+  const [mode, setMode] = useState<ExperienceMode>(initialMode)
   const [showMethodology, setShowMethodology] = useState(false)
+  const [showAssumptions, setShowAssumptions] = useState(false)
+  const [showDetailedPlan, setShowDetailedPlan] = useState(initialMode === 'expert')
+  const [showCompactEvidence, setShowCompactEvidence] = useState(false)
+  const [evidenceTab, setEvidenceTab] = useState<EvidenceTab>('checklist')
   const [showReport, setShowReport] = useState(shouldOpenReport)
   const [priceIntelligence, setPriceIntelligence] = useState<PriceIntelligence>({
     ...fallbackPriceIntelligence,
@@ -458,13 +494,11 @@ function App() {
   const selectedRegionalPrice = getRegionalPrice(selectedMaterial, profile.region, settings.regionCostMultiplier)
   const priceSeriesById = new Map(priceIntelligence.series.map((series) => [series.seriesId, series]))
   const strongestCertification = certificationSummary.opportunities[0]
-  const reportUrl = `${window.location.origin}${window.location.pathname}?report=1&scenario=${encodeScenarioState({
-    version: 1,
-    profile,
-    settings,
-    lines,
-    selectedMaterialId,
-  })}`
+  const reportUrl = buildScenarioUrl(true)
+  const isExpertMode = mode === 'expert'
+  const isGuidedMode = mode === 'guided'
+  const showFullPlan = isExpertMode || showDetailedPlan
+  const showEvidenceSection = !isCompactMode || showCompactEvidence || isExpertMode
 
   const profileCompleteness =
     62 +
@@ -683,18 +717,50 @@ function App() {
     }
   }
 
-  async function shareScenario() {
-    const scenario = encodeScenarioState({
+  function scenarioPayload(): ScenarioState {
+    return {
       version: 1,
       profile,
       settings,
       lines,
       selectedMaterialId,
-    })
+      mode,
+    }
+  }
+
+  function buildScenarioUrl(report = false) {
     const url = new URL(window.location.href)
     url.search = ''
-    url.searchParams.set('scenario', scenario)
-    const copied = await copyTextWithFallback(url.toString())
+    if (isEmbedMode) url.searchParams.set('embed', '1')
+    if (isCompactMode) url.searchParams.set('compact', '1')
+    if (shouldShowCompactPresets) url.searchParams.set('presets', '1')
+    if (report) url.searchParams.set('report', '1')
+    url.searchParams.set('mode', mode)
+    url.searchParams.set('scenario', encodeScenarioState(scenarioPayload()))
+    return url.toString()
+  }
+
+  function updateMode(nextMode: ExperienceMode) {
+    setMode(nextMode)
+    setShowDetailedPlan(nextMode === 'expert')
+    const url = new URL(window.location.href)
+    url.searchParams.set('mode', nextMode)
+    window.history.replaceState(null, '', url)
+  }
+
+  function jumpTo(selector: string) {
+    document.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function revealEvidence(tab: EvidenceTab) {
+    setEvidenceTab(tab)
+    setShowCompactEvidence(true)
+    window.setTimeout(() => jumpTo('.evidence-section'), 40)
+  }
+
+  async function shareScenario() {
+    const url = buildScenarioUrl(false)
+    const copied = await copyTextWithFallback(url)
     setShareState(copied ? 'Copied link' : 'Link ready')
     window.history.replaceState(null, '', url)
     window.setTimeout(() => setShareState('Share scenario'), 1800)
@@ -713,7 +779,7 @@ function App() {
   }
 
   return (
-    <main className={['app-shell', isEmbedMode ? 'embed' : '', isCompactMode ? 'compact' : ''].filter(Boolean).join(' ')}>
+    <main className={['app-shell', `mode-${mode}`, isEmbedMode ? 'embed' : '', isCompactMode ? 'compact' : ''].filter(Boolean).join(' ')}>
       {!isEmbedMode && (
         <header className="topbar">
           <div>
@@ -729,6 +795,18 @@ function App() {
             </div>
           </div>
           <div className="topbar-actions">
+            <div className="mode-switch" aria-label="Experience mode">
+              {(['guided', 'expert'] as ExperienceMode[]).map((option) => (
+                <button
+                  className={mode === option ? 'active' : ''}
+                  key={option}
+                  type="button"
+                  onClick={() => updateMode(option)}
+                >
+                  {option === 'guided' ? 'Guided' : 'Expert'}
+                </button>
+              ))}
+            </div>
             <button className="icon-button" type="button" onClick={shareScenario} title="Copy shareable scenario link">
               <Link2 size={18} />
               <span>{shareState}</span>
@@ -758,7 +836,7 @@ function App() {
         </header>
       )}
 
-      {!isCompactMode && (
+      {(!isCompactMode || shouldShowCompactPresets) && (
         <section className="preset-strip" aria-label="Quick start scenarios">
           <div>
             <span className="eyebrow">Quick start</span>
@@ -775,6 +853,18 @@ function App() {
         </section>
       )}
 
+      {isCompactMode && (
+        <div className="compact-summary-bar" aria-label="Compact scenario summary">
+          <div>
+            <strong>{formatCarbon(result.carbonSavings)}</strong>
+            <span>{formatPercent(result.savingsPercent)} reduction</span>
+          </div>
+          <button type="button" onClick={shareScenario}>Share</button>
+          <button type="button" onClick={openReport}>Report</button>
+          <button type="button" onClick={() => revealEvidence('checklist')}>Detail</button>
+        </div>
+      )}
+
       <section className="summary-grid">
         <Panel className="project-panel">
           <div className="panel-header">
@@ -784,15 +874,17 @@ function App() {
             </span>
           </div>
           <div className="project-fields">
-            <label htmlFor="project-name">
-              Name
-              <input
-                id="project-name"
-                aria-label="Project name"
-                value={profile.name}
-                onChange={(event) => updateProfile('name', event.target.value)}
-              />
-            </label>
+            {isExpertMode && (
+              <label htmlFor="project-name">
+                Name
+                <input
+                  id="project-name"
+                  aria-label="Project name"
+                  value={profile.name}
+                  onChange={(event) => updateProfile('name', event.target.value)}
+                />
+              </label>
+            )}
             <label htmlFor="project-type">
               Type
               <select
@@ -819,17 +911,6 @@ function App() {
                 onChange={(event) => updateProfile('areaM2', Number(event.target.value))}
               />
             </label>
-            <label htmlFor="project-levels">
-              Levels
-              <input
-                id="project-levels"
-                aria-label="Project levels"
-                type="number"
-                min="1"
-                value={profile.levels}
-                onChange={(event) => updateProfile('levels', Number(event.target.value))}
-              />
-            </label>
             <label htmlFor="project-structure">
               Structure
               <select
@@ -845,6 +926,19 @@ function App() {
                 ))}
               </select>
             </label>
+            {isExpertMode && (
+              <label htmlFor="project-levels">
+                Levels
+                <input
+                  id="project-levels"
+                  aria-label="Project levels"
+                  type="number"
+                  min="1"
+                  value={profile.levels}
+                  onChange={(event) => updateProfile('levels', Number(event.target.value))}
+                />
+              </label>
+            )}
             <label htmlFor="project-region">
               Region
               <select
@@ -855,21 +949,6 @@ function App() {
               >
                 {regions.map((region) => (
                   <option key={region}>{region}</option>
-                ))}
-              </select>
-            </label>
-            <label htmlFor="project-climate">
-              Climate
-              <select
-                id="project-climate"
-                aria-label="Climate zone"
-                value={profile.climate}
-                onChange={(event) =>
-                  updateProfile('climate', event.target.value as ProjectProfile['climate'])
-                }
-              >
-                {climates.map((climate) => (
-                  <option key={climate}>{climate}</option>
                 ))}
               </select>
             </label>
@@ -886,6 +965,23 @@ function App() {
                 ))}
               </select>
             </label>
+            {isExpertMode && (
+              <label htmlFor="project-climate">
+                Climate
+                <select
+                  id="project-climate"
+                  aria-label="Climate zone"
+                  value={profile.climate}
+                  onChange={(event) =>
+                    updateProfile('climate', event.target.value as ProjectProfile['climate'])
+                  }
+                >
+                  {climates.map((climate) => (
+                    <option key={climate}>{climate}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <button className="full-button" type="button" onClick={regenerateScope}>
             <RefreshCw size={16} />
@@ -912,6 +1008,35 @@ function App() {
           </div>
         </Panel>
 
+        {isGuidedMode && (
+          <Panel className="top-recommendation-panel">
+            <div className="panel-header">
+              <SectionTitle icon={<Sparkles size={18} />} label="Top Recommendation" />
+              <span className="status-chip">{leadRecommendation ? confidenceLabel(leadRecommendation) : confidenceSignal}</span>
+            </div>
+            {leadRecommendation ? (
+              <div className="top-recommendation">
+                <strong>{leadRecommendation.line.workPackage}</strong>
+                <span>
+                  Switch {leadRecommendation.baseline.product} to {leadRecommendation.alternative.brand} {leadRecommendation.alternative.product}.
+                </span>
+                <div className="trust-pills">
+                  <em>{formatCarbon(leadRecommendation.carbonSavings)}</em>
+                  <em>{leadRecommendation.costSavings >= 0 ? `${formatCurrency(leadRecommendation.costSavings)} saved` : `${formatCurrency(Math.abs(leadRecommendation.costSavings))} premium`}</em>
+                  <em>{priceBasisLabel(leadRecommendation, priceIntelligence.status)}</em>
+                  <em>{regionWarningLabel(leadRecommendation.alternativeRegionStatus)}</em>
+                </div>
+                <button type="button" className="full-button" onClick={() => jumpTo('.guided-plan-section')}>
+                  Review top substitutions
+                </button>
+              </div>
+            ) : (
+              <p className="muted">No positive substitution yet. Try a quick-start scenario or adjust the material plan.</p>
+            )}
+          </Panel>
+        )}
+
+        {isExpertMode && (
         <Panel className="chart-panel">
           <SectionTitle icon={<BarChart3 size={18} />} label="Carbon Compare" />
           <div className="compare-bars">
@@ -946,7 +1071,9 @@ function App() {
             </div>
           </div>
         </Panel>
+        )}
 
+        {isExpertMode && (
         <Panel className="settings-panel">
           <SectionTitle icon={<Settings2 size={18} />} label="Model" />
           <label>
@@ -1014,7 +1141,123 @@ function App() {
             <span>{Math.min(100, profileCompleteness)}% captured</span>
           </div>
         </Panel>
+        )}
       </section>
+
+      {isGuidedMode && (
+        <section className="advanced-assumptions">
+          <Panel>
+            <button
+              type="button"
+              className="drawer-toggle"
+              onClick={() => setShowAssumptions((current) => !current)}
+              aria-expanded={showAssumptions}
+            >
+              <span>
+                <Settings2 size={17} />
+                Advanced assumptions
+              </span>
+              <strong>{showAssumptions ? 'Hide' : 'Open'}</strong>
+            </button>
+            {showAssumptions && (
+              <div className="assumption-grid">
+                <label>
+                  Project name
+                  <input
+                    aria-label="Guided project name"
+                    value={profile.name}
+                    onChange={(event) => updateProfile('name', event.target.value)}
+                  />
+                </label>
+                <label>
+                  Levels
+                  <input
+                    aria-label="Guided project levels"
+                    type="number"
+                    min="1"
+                    value={profile.levels}
+                    onChange={(event) => updateProfile('levels', Number(event.target.value))}
+                  />
+                </label>
+                <label>
+                  Climate
+                  <select
+                    aria-label="Guided climate zone"
+                    value={profile.climate}
+                    onChange={(event) =>
+                      updateProfile('climate', event.target.value as ProjectProfile['climate'])
+                    }
+                  >
+                    {climates.map((climate) => (
+                      <option key={climate}>{climate}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Delivery km
+                  <input
+                    aria-label="Guided delivery distance kilometers"
+                    type="number"
+                    min="0"
+                    value={settings.transportDistanceKm}
+                    onChange={(event) =>
+                      setSettings((current) => ({ ...current, transportDistanceKm: Number(event.target.value) }))
+                    }
+                  />
+                </label>
+                <label>
+                  Carbon price $/t
+                  <input
+                    aria-label="Guided carbon price dollars per tonne"
+                    type="number"
+                    min="0"
+                    value={settings.carbonPriceUsdPerTonne}
+                    onChange={(event) =>
+                      setSettings((current) => ({ ...current, carbonPriceUsdPerTonne: Number(event.target.value) }))
+                    }
+                  />
+                </label>
+                <label>
+                  Cost factor
+                  <input
+                    aria-label="Guided regional cost factor"
+                    type="number"
+                    step="0.01"
+                    min="0.1"
+                    value={settings.regionCostMultiplier}
+                    onChange={(event) =>
+                      setSettings((current) => ({ ...current, regionCostMultiplier: Number(event.target.value) }))
+                    }
+                  />
+                </label>
+                <label>
+                  Contingency %
+                  <input
+                    aria-label="Guided cost contingency percent"
+                    type="number"
+                    min="0"
+                    value={settings.contingencyPercent}
+                    onChange={(event) =>
+                      setSettings((current) => ({ ...current, contingencyPercent: Number(event.target.value) }))
+                    }
+                  />
+                </label>
+                <label className="switch-row">
+                  <input
+                    aria-label="Guided include biogenic storage credit"
+                    type="checkbox"
+                    checked={settings.includeBiogenicStorage}
+                    onChange={(event) =>
+                      setSettings((current) => ({ ...current, includeBiogenicStorage: event.target.checked }))
+                    }
+                  />
+                  Storage credit
+                </label>
+              </div>
+            )}
+          </Panel>
+        </section>
+      )}
 
       <section className="strategy-grid">
         <Panel className="strategy-panel">
@@ -1064,6 +1307,40 @@ function App() {
         </Panel>
       </section>
 
+      {isGuidedMode && (
+        <section className="next-actions-section">
+          <Panel>
+            <div className="panel-header">
+              <SectionTitle icon={<CheckCircle2 size={18} />} label="Next Best Actions" />
+              <span className="status-chip">{profileCompleteness}% captured</span>
+            </div>
+            <div className="action-grid">
+              <article>
+                <b>1</b>
+                <strong>Confirm the project profile</strong>
+                <span>{profile.projectType}, {profile.areaM2.toLocaleString()} m2, {profile.region}, {profile.stage}.</span>
+                <button type="button" onClick={() => jumpTo('.project-panel')}>Review profile</button>
+              </article>
+              <article>
+                <b>2</b>
+                <strong>Review the top substitutions</strong>
+                <span>{topRecommendations.slice(0, 3).map((item) => item.line.workPackage).join(', ') || 'No positive moves yet'}.</span>
+                <button type="button" onClick={() => jumpTo('.guided-plan-section')}>Open substitutions</button>
+              </article>
+              <article>
+                <b>3</b>
+                <strong>Export or inspect evidence</strong>
+                <span>Generate the report, or check price, region, and certification evidence first.</span>
+                <div>
+                  <button type="button" onClick={openReport}>Report</button>
+                  <button type="button" onClick={() => revealEvidence('checklist')}>Evidence</button>
+                </div>
+              </article>
+            </div>
+          </Panel>
+        </section>
+      )}
+
       {showMethodology && !isCompactMode && (
         <section className="methodology-drawer">
           <Panel>
@@ -1085,6 +1362,7 @@ function App() {
         </section>
       )}
 
+      {isExpertMode && (
       <section className="intelligence-grid">
         <Panel className="market-panel">
           <div className="panel-header">
@@ -1164,11 +1442,19 @@ function App() {
           </div>
         </Panel>
       </section>
+      )}
 
-      <section className="workbench-grid">
+      <section className="workbench-grid guided-plan-section">
         <Panel className="line-editor">
           <div className="panel-header">
-            <SectionTitle icon={<LineChart size={18} />} label="Material Plan" />
+            <SectionTitle icon={<LineChart size={18} />} label={isGuidedMode ? 'Top 3 Substitutions' : 'Material Plan'} />
+            {isGuidedMode && (
+              <button type="button" className="icon-button" onClick={() => setShowDetailedPlan((current) => !current)}>
+                <LineChart size={16} />
+                <span>{showDetailedPlan ? 'Hide detailed plan' : 'Open detailed material plan'}</span>
+              </button>
+            )}
+            {showFullPlan && (
             <div className="row-actions">
               <select
                 aria-label="Add material category"
@@ -1189,8 +1475,31 @@ function App() {
                 <Plus size={17} />
               </button>
             </div>
+            )}
           </div>
 
+          {isGuidedMode && !showDetailedPlan && (
+            <div className="guided-substitution-table">
+              {topRecommendations.slice(0, 3).map((item) => (
+                <article key={item.line.id}>
+                  <div>
+                    <strong>{item.line.workPackage}</strong>
+                    <span>{item.baseline.product} to {item.alternative.product}</span>
+                  </div>
+                  <b>{formatCarbon(item.carbonSavings)}</b>
+                  <em>{item.costSavings >= 0 ? `${formatCurrency(item.costSavings)} saved` : `${formatCurrency(Math.abs(item.costSavings))} premium`}</em>
+                  <div className="trust-pills">
+                    <small>{confidenceLabel(item)}</small>
+                    <small>{priceBasisLabel(item, priceIntelligence.status)}</small>
+                    <small>{regionWarningLabel(item.alternativeRegionStatus)}</small>
+                  </div>
+                </article>
+              ))}
+              {topRecommendations.length === 0 && <p className="muted">No positive substitutions yet. Try a preset or open the detailed material plan.</p>}
+            </div>
+          )}
+
+          {showFullPlan && (
           <div className="scope-table">
             <div className="scope-head">
               <span>Package</span>
@@ -1281,8 +1590,10 @@ function App() {
               )
             })}
           </div>
+          )}
         </Panel>
 
+        {showFullPlan && (
         <aside className="side-stack">
           <Panel>
             <SectionTitle icon={<Sparkles size={18} />} label="Best Moves" />
@@ -1325,8 +1636,197 @@ function App() {
             </div>
           </Panel>
         </aside>
+        )}
       </section>
 
+      {isGuidedMode && showEvidenceSection && (
+        <section className="evidence-section">
+          <Panel>
+            <div className="panel-header">
+              <SectionTitle icon={<FileCheck2 size={18} />} label="Evidence & Technical Detail" />
+              {isCompactMode && (
+                <button type="button" className="icon-button" onClick={() => setShowCompactEvidence(false)}>
+                  Close detail
+                </button>
+              )}
+            </div>
+            <div className="evidence-tabs" role="tablist" aria-label="Evidence detail tabs">
+              {([
+                ['checklist', 'Evidence checklist'],
+                ['dossier', 'Material dossier'],
+                ['certifications', 'Certifications'],
+                ['pricing', 'Pricing methodology'],
+                ['sources', 'Sources'],
+              ] as [EvidenceTab, string][]).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={evidenceTab === tab}
+                  className={evidenceTab === tab ? 'active' : ''}
+                  onClick={() => setEvidenceTab(tab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {evidenceTab === 'checklist' && (
+              <div className="evidence-body">
+                <div className="evidence-summary">
+                  <span>
+                    <b>{certificationSummary.epdReadyCount}</b>
+                    EPD-ready active products
+                  </span>
+                  <span>
+                    <b>{regionalStats.score}%</b>
+                    Regional fit for selected materials
+                  </span>
+                  <span>
+                    <b>{priceIntelligence.status === 'live' ? 'Live' : 'Benchmark'}</b>
+                    Price basis
+                  </span>
+                </div>
+                <div className="evidence-list">
+                  {topRecommendations.slice(0, 3).map((item) => (
+                    <article key={item.line.id}>
+                      <strong>{item.line.workPackage}</strong>
+                      <span>{confidenceLabel(item)} / {priceBasisLabel(item, priceIntelligence.status)} / {regionWarningLabel(item.alternativeRegionStatus)}</span>
+                      <p>{item.alternative.brand} {item.alternative.product}: {formatCarbon(item.carbonSavings)} avoided before operational energy.</p>
+                    </article>
+                  ))}
+                  {certificationSummary.topEvidence.slice(0, 4).map((item) => (
+                    <article key={item}>
+                      <strong>Certification evidence</strong>
+                      <span>{item}</span>
+                      <p>Validate with project-specific submittals before formal credit claims.</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {evidenceTab === 'dossier' && (
+              <div className="evidence-body">
+                <div className="portfolio-tools evidence-tools">
+                  <label className="searchbox">
+                    <Search size={16} />
+                    <input
+                      aria-label="Search guided material dossier"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search products, specs, tags"
+                    />
+                  </label>
+                  <label className="filterbox">
+                    <Filter size={16} />
+                    <select
+                      aria-label="Filter guided material dossier by category"
+                      value={categoryFilter}
+                      onChange={(event) => setCategoryFilter(event.target.value as CategoryFilter)}
+                    >
+                      <option>All</option>
+                      {categoryOrder.map((category) => (
+                        <option key={category}>{category}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <MaterialDossierPanel
+                  material={selectedMaterial}
+                  dossier={selectedDossier}
+                  availability={selectedAvailability}
+                  region={profile.region}
+                  regionalPrice={selectedRegionalPrice}
+                  priceSeries={priceSeriesById.get(selectedDossier.priceSignal.seriesId)}
+                />
+                <div className="material-grid evidence-material-grid">
+                  {filteredMaterials.slice(0, 12).map((material) => (
+                    <MaterialCard
+                      key={material.id}
+                      material={material}
+                      region={profile.region}
+                      selected={material.id === selectedMaterialId}
+                      onSelect={() => setSelectedMaterialId(material.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {evidenceTab === 'certifications' && (
+              <div className="evidence-body">
+                <div className="certification-stack">
+                  {certificationSummary.opportunities.slice(0, 6).map((opportunity) => (
+                    <CertificationCard key={opportunity.system} opportunity={opportunity} />
+                  ))}
+                </div>
+                <div className="cert-evidence">
+                  <span>
+                    <FileCheck2 size={14} />
+                    {certificationSummary.epdReadyCount} EPD-ready products
+                  </span>
+                  <span>
+                    <PackageCheck size={14} />
+                    {certificationSummary.materialHealthWatchCount} health watch item(s)
+                  </span>
+                  <span>
+                    <CheckCircle2 size={14} />
+                    Formal certification requires assessor review and final documentation.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {evidenceTab === 'pricing' && (
+              <div className="evidence-body evidence-pricing">
+                <div className="methodology-grid">
+                  <span><b>Carbon model</b>A1-A3 material values plus transport and optional biogenic storage credit.</span>
+                  <span><b>Price basis</b>{priceIntelligence.status === 'live' ? 'Official PPI movement adjusts concept benchmarks.' : 'Static benchmark estimate until live feed is available.'}</span>
+                  <span><b>Quote threshold</b>Products with benchmark-only signals should be confirmed by exact supplier quote.</span>
+                  <span><b>Regional fit</b>{regionalStats.preferredOrAvailable}/{regionalStats.total} active materials are preferred or available in {profile.region}.</span>
+                  <span><b>Last check</b>{priceIntelligence.lastCheckedAt}</span>
+                  <span><b>Cadence</b>{priceIntelligence.cadence}</span>
+                </div>
+                <div className="price-series-list">
+                  {priceIntelligence.series.slice(0, 6).map((series) => (
+                    <a href={series.sourceUrl} target="_blank" rel="noreferrer" key={series.seriesId}>
+                      <span>{series.seriesId}</span>
+                      <strong>
+                        {series.monthlyChangePercent === null
+                          ? 'Index ready'
+                          : `${series.monthlyChangePercent >= 0 ? '+' : ''}${series.monthlyChangePercent.toFixed(1)}%`}
+                      </strong>
+                    </a>
+                  ))}
+                  {priceIntelligence.series.length === 0 && (
+                    <span className="muted">{priceIntelligence.limitation}</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {evidenceTab === 'sources' && (
+              <div className="evidence-body evidence-sources">
+                <pre className="brief">{decisionBrief}</pre>
+                <div className="source-list">
+                  {sourceNotes.map((note) => (
+                    <a href={note.url} target="_blank" rel="noreferrer" key={note.label}>
+                      <strong>
+                        {note.label}
+                        <ExternalLink size={14} />
+                      </strong>
+                      <span>{note.detail}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Panel>
+        </section>
+      )}
+
+      {isExpertMode && (
       <section className="portfolio-section">
         <Panel>
           <div className="panel-header">
@@ -1379,6 +1879,7 @@ function App() {
           </div>
         </Panel>
       </section>
+      )}
 
       {!isEmbedMode && (
         <section className="cta-band">
@@ -1394,6 +1895,7 @@ function App() {
         </section>
       )}
 
+      {isExpertMode && (
       <section className="brief-grid">
         <Panel>
           <SectionTitle icon={<FileText size={18} />} label="Decision Brief" />
@@ -1425,6 +1927,7 @@ function App() {
           </div>
         </Panel>
       </section>
+      )}
 
       {showReport && (
         <ReportOverlay
@@ -1523,6 +2026,7 @@ function ReportOverlay({
                 <span>{item.baseline.product}</span>
                 <span>{item.alternative.product}</span>
                 <b>{formatCarbon(item.carbonSavings)}</b>
+                <small>{confidenceLabel(item)} / {priceBasisLabel(item, priceIntelligence.status)} / {regionWarningLabel(item.alternativeRegionStatus)}</small>
               </div>
             ))}
           </div>
